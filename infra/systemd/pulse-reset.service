@@ -1,0 +1,11 @@
+[Unit]
+Description=Pulse AI Ops — Nightly seed reset
+After=pulse-api.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/pulse/apps/api
+EnvironmentFile=-/etc/pulse/pulse.env
+ExecStart=/opt/pulse/apps/api/.venv/bin/python -c "import asyncio; from pulse import sync; asyncio.run(sync.reset())"

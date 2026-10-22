@@ -1,0 +1,218 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
+
+/*
+ * Design tokens: neutral zinc base, one iris accent, semantic tones, two themes.
+ * The theme lives in [data-theme] on <html>; app/theme.ts picks it from storage or the OS.
+ */
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e9e9ec;
+  --border: #e7e7ea;
+  --border-strong: #d4d4d8;
+  --text: #0b0b0f;
+  --text-2: #3f3f46;
+  --muted: #6b6b75;
+  --faint: #a1a1aa;
+  --accent: #5b5bd6;
+  --accent-2: #4b4bc4;
+  --accent-soft: #eff0ff;
+  --accent-fg: #ffffff;
+  --danger: #d93d42;
+  --danger-soft: #fdeeee;
+  --warning: #b86a00;
+  --warning-soft: #fff4e0;
+  --success: #18794e;
+  --success-soft: #e8f6ee;
+  --info: #0a6fc2;
+  --info-soft: #e8f2fc;
+  --chart-1: #5b5bd6;
+  --chart-2: #12a594;
+  --chart-3: #f2a03d;
+  --chart-4: #e5484d;
+  --chart-5: #a1a1aa;
+  --shadow: 0 1px 2px rgb(16 16 24 / 0.04), 0 1px 3px rgb(16 16 24 / 0.05);
+  --shadow-lg: 0 12px 32px rgb(16 16 24 / 0.12), 0 2px 6px rgb(16 16 24 / 0.06);
+  --ring: color-mix(in oklab, var(--accent) 45%, transparent);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #09090b;
+  --surface: #111113;
+  --surface-2: #18181b;
+  --surface-3: #232327;
+  --border: #222226;
+  --border-strong: #303036;
+  --text: #ededef;
+  --text-2: #c5c5cc;
+  --muted: #8d8d97;
+  --faint: #5d5d67;
+  --accent: #8587f3;
+  --accent-2: #9a9cf7;
+  --accent-soft: rgb(133 135 243 / 0.14);
+  --accent-fg: #0b0b1a;
+  --danger: #f2666a;
+  --danger-soft: rgb(242 102 106 / 0.13);
+  --warning: #f0a843;
+  --warning-soft: rgb(240 168 67 / 0.13);
+  --success: #3dd68c;
+  --success-soft: rgb(61 214 140 / 0.12);
+  --info: #5eb1f7;
+  --info-soft: rgb(94 177 247 / 0.13);
+  --chart-1: #8587f3;
+  --chart-2: #2ec4b0;
+  --chart-3: #f0a843;
+  --chart-4: #f2666a;
+  --chart-5: #5d5d67;
+  --shadow: 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-md: 16px;
+  --text-md--line-height: 24px;
+  --text-lg: 20px;
+  --text-lg--line-height: 28px;
+  --text-xl: 24px;
+  --text-xl--line-height: 32px;
+  --text-2xl: 32px;
+  --text-2xl--line-height: 38px;
+  --text-3xl: 40px;
+  --text-3xl--line-height: 46px;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button {
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  button:disabled {
+    cursor: default;
+  }
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum', 'cv11';
+}
+@utility mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+@utility skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.transcript mark {
+  background: var(--warning-soft);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}

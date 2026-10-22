@@ -1,0 +1,20 @@
+[Unit]
+Description=Pulse AI Ops — API service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/pulse/apps/api
+EnvironmentFile=-/etc/pulse/pulse.env
+ExecStart=/opt/pulse/apps/api/.venv/bin/uvicorn pulse.main:app --host 127.0.0.1 --port 8010
+Restart=always
+RestartSec=3
+
+# Strict memory limits to protect the server
+MemoryMax=512M
+MemoryHigh=400M
+
+[Install]
+WantedBy=multi-user.target

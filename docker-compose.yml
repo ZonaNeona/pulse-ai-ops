@@ -1,0 +1,28 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8010:8010"
+    environment:
+      - CRM_MODE=emulator
+      - ERP_MODE=emulator
+      - PUBLIC_URL=http://localhost:8010
+      - PULSE_DATA_DIR=/app/var
+    volumes:
+      - pulse_data:/app/var
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "5180:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pulse_data:
