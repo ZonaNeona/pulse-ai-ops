@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from pulse import bot, data
 from pulse.agents import hermes, runner, tools
@@ -26,11 +26,23 @@ Who = Annotated[Visitor, Depends(visitor.identify)]
 
 
 class Question(BaseModel):
-    message: str = Field(min_length=1, max_length=800)
+    message: str = Field(default="", max_length=1000)
+    question: str = Field(default="", max_length=1000)
+    text: str = Field(default="", max_length=1000)
+    prompt: str = Field(default="", max_length=1000)
+
+    @property
+    def query(self) -> str:
+        return (self.message or self.question or self.text or self.prompt).strip()
+
+    @model_validator(mode="after")
+    def validate_not_empty(self) -> "Question":
+        if not self.query:
+            raise ValueError("Вопрос не может быть пустым")
+        return self
 
 
-class KbQuestion(BaseModel):
-    question: str = Field(min_length=1, max_length=500)
+KbQuestion = Question
 
 
 # --- Overview and sales -------------------------------------------------------
@@ -166,8 +178,8 @@ def get_kb_eval() -> dict[str, Any]:
 
 
 @router.post("/kb/ask")
-async def ask_kb(body: KbQuestion, who: Who) -> dict[str, Any]:
-    return (await knowledge.answer(body.question, who.quota)).to_dict()
+async def ask_kb(body: Question, who: Who) -> dict[str, Any]:
+    return (await knowledge.answer(body.query, who.quota)).to_dict()
 
 
 # --- Copilot, drafts, traces, budget ------------------------------------------
@@ -175,7 +187,7 @@ async def ask_kb(body: KbQuestion, who: Who) -> dict[str, Any]:
 
 @router.post("/copilot/chat")
 async def copilot_chat(body: Question, who: Who) -> dict[str, Any]:
-    return await runner.ask(body.message, who)
+    return await runner.ask(body.query, who)
 
 
 @router.get("/copilot/drafts")
