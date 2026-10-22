@@ -1,156 +1,111 @@
-"""Tests for the Documents module: LangGraph state machine, 1C/CRM checks, and API routes."""
+"""Documents: the LangGraph pipeline over the day's demo queue and uploaded files, human-in-the-loop."""
+
+import json
 
 import pytest
-from starlette.testclient import TestClient
 
-from pulse import data, sync
-from pulse.agents import tools
-from pulse.core import db
 from pulse.modules import docs
+from pulse.modules.docs import read
+from tests.conftest import Script, reply
+
+INVOICE = (
+    "Счёт на оплату № 55 от 20.10.2026\n"
+    "Поставщик: ООО «Неизвестный поставщик», ИНН 7800000001\n"
+    "Всего к оплате: 100 000,00 руб.\n"
+    "В том числе НДС 20%: 16 666,67"
+)
 
 
-@pytest.fixture
-async def snapshot() -> data.Data:
-    db.init()
-    await sync.reset()
-    return data.load()
+def by_number(items: list[dict], number: str) -> dict:  # type: ignore[type-arg]
+    return next(d for d in items if any(f["key"] == "number" and f["value"] == number for f in d["fields"]))
 
 
-def test_classify_and_extract() -> None:
-    text = (
-        "Счёт на оплату № 582 от 21.10.2026\n"
-        "Поставщик: ООО «ВентТехСнаб», ИНН 7814562019\n"
-        "Покупатель: ООО «Норд Инжиниринг»\n"
-        "Основание: Заказ поставщику № ЗП-0388\n"
-        "Итого к оплате: 421 300,00 руб.\n"
-        "В том числе НДС 20%: 70 216,67 руб."
-    )
-
-    kind, kind_label, conf = docs.extract.classify_text(text)
-    assert kind == "invoice"
-    assert kind_label == "Счёт"
-    assert conf > 0.9
-
-    parsed = docs.extract.parse_raw_document(text)
-    assert parsed["kind"] == "invoice"
-    assert "582" in parsed["number"]
-    assert parsed["amount"] == 421300.0
-    assert "ВентТехСнаб" in parsed["counterparty"]
+def failed(doc: dict) -> list[str]:  # type: ignore[type-arg]
+    return [c["label"] for c in doc["checks"] if not c["ok"]]
 
 
-def test_langgraph_pipeline_mismatch_and_confirm(snapshot: data.Data) -> None:
-    # 1. Run pipeline on the planted mismatch seed invoice (421 300 vs 412 300 in 1C order ЗП-0388)
-    initial = {
+async def test_demo_queue_goes_through_the_graph_with_every_outcome(ready: None) -> None:
+    items = await docs.queue("s1")
+    statuses = sorted(d["status"] for d in items)
+    assert statuses.count("posted") == 2 and statuses.count("mismatch") == 1 and statuses.count("review") == 3
+
+    planted = by_number(items, "2417")
+    assert planted["status"] == "mismatch"
+    assert "Сумма совпадает с заказом" in failed(planted)
+    total = next(f for f in planted["fields"] if f["key"] == "total")
+    assert total["expected"] and "+9 000" in next(c["detail"] for c in planted["checks"] if not c["ok"])
+    assert [s["node"] for s in planted["steps"]][:3] == ["extract", "validate", "review"]
+
+    assert "НДС посчитан верно" in failed(by_number(items, "342"))
+    assert "Контрагент есть в 1С" in failed(by_number(items, "77"))
+    assert "Неустойка в пределах политики" in failed(by_number(items, "М-77/10"))
+    for number in ("1182", "904"):
+        doc = by_number(items, number)
+        assert doc["status"] == "posted" and not failed(doc)
+
+
+async def test_a_person_resumes_the_stopped_graph(ready: None) -> None:
+    items = await docs.queue("s1")
+    planted = by_number(items, "2417")
+    approved = await docs.decide("s1", planted["id"], approve=True)
+    assert approved.status == "posted" and approved.decision == "Подтверждено человеком"
+    assert any(s.node == "post" and s.status == "done" for s in approved.steps)
+    with pytest.raises(docs.NotAllowed):
+        await docs.decide("s1", planted["id"], approve=False)
+
+    stranger = by_number(items, "77")
+    rejected = await docs.decide("s1", stranger["id"], approve=False)
+    assert rejected.status == "rejected"
+
+
+async def test_visitors_do_not_see_each_others_documents(ready: None) -> None:
+    first = await docs.queue("s1")
+    planted = by_number(first, "2417")
+    await docs.decide("s1", planted["id"], approve=True)
+    second = await docs.queue("s2")
+    assert by_number(second, "2417")["status"] == "mismatch"
+    assert await docs.get("s2", planted["id"]) is None
+    with pytest.raises(docs.NotAllowed):
+        await docs.decide("s2", planted["id"], approve=False)
+
+
+async def test_uploaded_text_is_read_by_rules_without_a_model(ready: None) -> None:
+    doc = await docs.upload("s1", "q1", "schet.txt", INVOICE.encode())
+    assert doc.engine == "rules" and doc.value("number") == "55"
+    assert doc.status == "review" and "Контрагент есть в 1С" in [c.label for c in doc.checks if not c.ok]
+
+
+async def test_uploaded_image_needs_the_vision_model(ready: None) -> None:
+    with pytest.raises(read.Unreadable, match="vision"):
+        await docs.upload("s1", "q1", "scan.png", b"\x89PNG fake")
+
+
+async def test_uploaded_document_is_read_by_the_model_when_connected(ready: None, model: Script) -> None:
+    fields = {
         "kind": "invoice",
-        "kind_label": "Счёт",
-        "number": "№ 2417",
-        "date": "21.10.2026",
-        "counterparty": "ООО «ВентТехСнаб»",
-        "amount": 421_300.0,
-        "confidence": 0.93,
-        "fields": [
-            {"key": "supplier", "label": "Поставщик", "value": "ООО «ВентТехСнаб»", "confidence": 0.99},
-            {"key": "order", "label": "Основание", "value": "Заказ поставщику № ЗП-0388", "confidence": 0.91},
-            {"key": "amount", "label": "Сумма с НДС", "value": "421 300,00 ₽", "confidence": 0.97},
-        ],
-        "raw_text": "Счёт № 2417 от ООО «ВентТехСнаб» на сумму 421 300 руб по заказу ЗП-0388",
+        "fields": {
+            "number": {"value": "55", "confidence": 0.98},
+            "date": {"value": "20.10.2026", "confidence": 0.95},
+            "counterparty": {"value": "ООО «Неизвестный поставщик»", "confidence": 0.9},
+            "inn": {"value": "7800000001", "confidence": 0.9},
+            "total": {"value": "100000", "confidence": 0.97},
+        },
     }
-
-    res1 = docs.graph.run_pipeline(doc_id=999, initial=initial, approved=False)
-    # Must detect mismatch and halt for human review
-    assert res1["status"] == "mismatch"
-    assert res1["needs_human"] is True
-
-    # Validate step should have error status
-    val_step = next(s for s in res1["steps"] if s["node"] == "validate")
-    assert val_step["status"] == "error"
-
-    # Amount check must be ok=False
-    amt_check = next(c for c in res1["checks"] if "Сумма" in c["label"])
-    assert amt_check["ok"] is False
-
-    # Review step should be active (waiting for human)
-    rev_step = next(s for s in res1["steps"] if s["node"] == "review")
-    assert rev_step["status"] == "active"
-
-    # 2. Human approval resumes thread to create draft and complete
-    res2 = docs.graph.confirm_step(doc_id=999, current_state=res1)
-    assert res2["status"] == "posted"
-    draft_step = next(s for s in res2["steps"] if s["node"] == "draft")
-    assert draft_step["status"] == "done"
+    model.append(reply(json.dumps(fields, ensure_ascii=False), cost=0.0021))
+    doc = await docs.upload("s1", "q1", "schet.txt", INVOICE.encode())
+    assert doc.engine == "model" and doc.cost_usd == 0.0021
+    assert doc.value("total") == "100 000,00 ₽"
+    assert model.requests[0]["response_format"] == {"type": "json_object"}
 
 
-def test_docs_store_and_tools(snapshot: data.Data) -> None:
-    session = "test_store_session"
-    items = docs.list_docs(session)
-    assert len(items) >= 8
-
-    doc1 = docs.get_doc(1, session)
-    assert doc1 is not None
-    assert doc1.status == "mismatch"
-    assert doc1.number == "№ 2417"
-
-    # Tools
-    q = tools.run_tool("docs_queue", {})
-    assert len(q) >= 1
-    assert any(d["id"] == 1 for d in q)
-
-    detail = tools.run_tool("review_doc", {"doc_id": 1})
-    assert detail["number"] == "№ 2417"
-    assert "steps" in detail
+def test_unreadable_files_are_refused_with_a_reason() -> None:
+    with pytest.raises(read.Unreadable):
+        read.text_of("big.txt", b"x" * (read.MAX_BYTES + 1))
+    with pytest.raises(read.Unreadable):
+        read.text_of("table.xlsx", b"PK")
 
 
-def test_api_docs_endpoints(snapshot: data.Data) -> None:
-    from pulse.main import app
-
-    with TestClient(app) as client:
-        # 1. List
-        r = client.get("/api/docs", headers={"x-visitor-id": "api_test_user"})
-        assert r.status_code == 200
-        docs_list = r.json()
-        assert len(docs_list) >= 8
-        assert docs_list[0]["id"] == 1
-
-        # 2. Detail
-        r_det = client.get("/api/docs/1", headers={"x-visitor-id": "api_test_user"})
-        assert r_det.status_code == 200
-        det = r_det.json()
-        assert det["counterparty"] == "ООО «ВентТехСнаб»"
-        assert len(det["steps"]) == 5
-
-        # 3. Graph schema
-        r_schema = client.get("/api/docs/graph/schema")
-        assert r_schema.status_code == 200
-        assert "flowchart" in r_schema.json()["mermaid"]
-
-        # 4. Confirm document (Human-in-the-loop)
-        r_conf = client.post("/api/docs/1/confirm", headers={"x-visitor-id": "api_test_user"})
-        assert r_conf.status_code == 200
-        conf_data = r_conf.json()
-        assert conf_data["status"] == "posted"
-
-        # 5. Upload document
-        r_up = client.post(
-            "/api/docs/upload",
-            headers={"x-visitor-id": "api_test_user"},
-        )
-        assert r_up.status_code == 200
-        up_data = r_up.json()
-        assert up_data["id"] > 0
-        assert len(up_data["steps"]) > 0
-
-
-def test_upload_budget_limit(snapshot: data.Data) -> None:
-    from pulse.main import app
-
-    visitor = "limited_doc_user"
-    with TestClient(app) as client:
-        # Exhaust 3 documents limit
-        for _ in range(3):
-            r = client.post("/api/docs/upload", headers={"x-visitor-id": visitor})
-            assert r.status_code == 200
-
-        # 4th document must be rejected with 429
-        r4 = client.post("/api/docs/upload", headers={"x-visitor-id": visitor})
-        assert r4.status_code == 429
-        assert "лимит" in r4.json()["detail"].lower()
+def test_the_graph_is_drawn_by_langgraph_itself() -> None:
+    chart = docs.graph.mermaid()
+    for node in ("extract", "validate", "review", "post", "reject"):
+        assert node in chart

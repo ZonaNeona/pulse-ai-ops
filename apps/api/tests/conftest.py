@@ -30,3 +30,66 @@ def dataset() -> tuple[dict, dict]:  # type: ignore[type-arg]
     from pulse.seed import b24
 
     return b24.generate(NOW)
+
+
+@pytest.fixture
+async def ready() -> None:
+    """A synced demo company in the test's own data dir."""
+    from pulse import sync
+    from pulse.core import db
+
+    db.init()
+    await sync.reset()
+
+
+class Script(list):  # type: ignore[type-arg]
+    """Scripted model replies (OpenRouter response bodies) and the requests that were sent."""
+
+    requests: list[dict]  # type: ignore[type-arg]
+
+
+@pytest.fixture
+def model(monkeypatch: pytest.MonkeyPatch) -> Iterator[Script]:
+    """A connected model: append replies to the script, read what was sent from `script.requests`."""
+    import json
+
+    import httpx
+
+    from pulse.core import llm
+
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    get_settings.cache_clear()
+    replies = Script()
+    sent: list[dict] = []  # type: ignore[type-arg]
+    replies.requests = sent
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        if not replies:
+            return httpx.Response(503)
+        return httpx.Response(200, json=replies.pop(0))
+
+    llm._transport = httpx.MockTransport(handle)
+    yield replies
+    llm._transport = None
+
+
+def reply(content: str = "", tool_calls: list[dict] | None = None, cost: float = 0.0012) -> dict:  # type: ignore[type-arg]
+    message: dict = {"role": "assistant", "content": content}  # type: ignore[type-arg]
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    return {
+        "model": "deepseek/deepseek-chat",
+        "choices": [{"message": message}],
+        "usage": {"prompt_tokens": 900, "completion_tokens": 60, "cost": cost},
+    }
+
+
+def tool_call(name: str, args: dict, call_id: str = "c1") -> dict:  # type: ignore[type-arg]
+    import json
+
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)},
+    }

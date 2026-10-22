@@ -110,17 +110,35 @@ export function Badge({
   )
 }
 
-export function Dot({ tone = 'neutral', pulse, className }: { tone?: Tone; pulse?: boolean; className?: string }) {
+export function Dot({
+  tone = 'neutral',
+  pulse,
+  className,
+}: {
+  tone?: Tone
+  pulse?: boolean
+  className?: string
+}) {
   return (
     <span className={clsx('relative inline-flex size-2 shrink-0', className)}>
-      {pulse && <span className={clsx('absolute inset-0 animate-ping rounded-full opacity-50', toneBg[tone])} />}
+      {pulse && (
+        <span className={clsx('absolute inset-0 animate-ping rounded-full opacity-50', toneBg[tone])} />
+      )}
       <span className={clsx('relative size-2 rounded-full', toneBg[tone])} />
     </span>
   )
 }
 
 /** Change vs. previous period. `invert` — growth is bad (missed calls, overdue). */
-export function Delta({ value, suffix = '%', invert }: { value: number | null; suffix?: string; invert?: boolean }) {
+export function Delta({
+  value,
+  suffix = '%',
+  invert,
+}: {
+  value: number | null
+  suffix?: string
+  invert?: boolean
+}) {
   if (value === null) return null
   const flat = value === 0
   const good = flat ? null : invert ? value < 0 : value > 0
@@ -128,7 +146,11 @@ export function Delta({ value, suffix = '%', invert }: { value: number | null; s
     <span
       className={clsx(
         'num inline-flex h-5 items-center gap-0.5 rounded-sm px-1 text-xs font-medium',
-        good === null ? 'bg-surface-2 text-muted' : good ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger',
+        good === null
+          ? 'bg-surface-2 text-muted'
+          : good
+            ? 'bg-success-soft text-success'
+            : 'bg-danger-soft text-danger',
       )}
     >
       {!flat && (value > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />)}
@@ -276,7 +298,9 @@ export function Empty({
 }) {
   return (
     <div className="flex flex-col items-center px-6 py-10 text-center">
-      {icon && <div className="mb-3 grid size-10 place-items-center rounded-lg bg-surface-2 text-muted">{icon}</div>}
+      {icon && (
+        <div className="mb-3 grid size-10 place-items-center rounded-lg bg-surface-2 text-muted">{icon}</div>
+      )}
       <p className="text-base font-medium text-ink">{title}</p>
       {text && <p className="mt-1 max-w-sm text-sm text-muted">{text}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -315,7 +339,9 @@ export function Notice({
   className?: string
 }) {
   return (
-    <div className={clsx('flex items-start gap-2.5 rounded-md px-3 py-2.5 text-sm', toneSoft[tone], className)}>
+    <div
+      className={clsx('flex items-start gap-2.5 rounded-md px-3 py-2.5 text-sm', toneSoft[tone], className)}
+    >
       <span className="mt-px shrink-0">{icon ?? <Info size={15} />}</span>
       <div className="min-w-0 flex-1">{children}</div>
       {action}
@@ -357,7 +383,15 @@ export function Toggle({
 }
 
 /** Labelled value in a definition grid: «Сумма — 412 300 ₽». */
-export function Field({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {
+export function Field({
+  label,
+  children,
+  className,
+}: {
+  label: ReactNode
+  children: ReactNode
+  className?: string
+}) {
   return (
     <div className={clsx('min-w-0', className)}>
       <dt className="text-xs text-muted">{label}</dt>
@@ -367,10 +401,3 @@ export function Field({ label, children, className }: { label: ReactNode; childr
 }
 
 /** Shown on screens whose module is still being built: what you see is the design on sample data. */
-export function PreviewBanner({ what }: { what: string }) {
-  return (
-    <Notice tone="accent" className="mb-4">
-      <span className="font-medium">Модуль подключается.</span> Сейчас показан дизайн экрана на примерах: {what}
-    </Notice>
-  )
-}

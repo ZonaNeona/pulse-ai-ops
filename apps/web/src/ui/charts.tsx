@@ -64,7 +64,13 @@ export function Sparkline({
 
 export type BarSeries = { key: string; label: string; color: string }
 /** `label` sits under the bar, `title` (falls back to label) is shown in the hover read-out. */
-export type BarPoint = { key: string; label: string; title?: string; muted?: boolean; values: Record<string, number> }
+export type BarPoint = {
+  key: string
+  label: string
+  title?: string
+  muted?: boolean
+  values: Record<string, number>
+}
 
 /** Stacked vertical bars with hover read-out and a legend. */
 export function StackedBars({
@@ -152,7 +158,10 @@ export function StackedBars({
             (i % labelEvery === 0 || i === n - 1) && (
               <span
                 key={p.key}
-                className={clsx('num absolute -translate-x-1/2 text-[10px]', p.muted ? 'text-faint' : 'text-muted')}
+                className={clsx(
+                  'num absolute -translate-x-1/2 text-[10px]',
+                  p.muted ? 'text-faint' : 'text-muted',
+                )}
                 style={{ left: `${((i + 0.5) / n) * 100}%` }}
               >
                 {p.label}
@@ -185,7 +194,14 @@ export function Ring({
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90" aria-hidden>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="var(--surface-3)"
+          strokeWidth={stroke}
+        />
         <circle
           cx={size / 2}
           cy={size / 2}

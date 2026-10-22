@@ -1,101 +1,34 @@
-"""Full-text search engine (FTS5 + BM25 ranking + fallback) over company regulations."""
+"""BM25 retrieval over the stemmed index, plus how much of the question each section actually covers."""
 
-import re
-from typing import Any
+from dataclasses import dataclass
 
 from pulse.core import db
-
-STOP_WORDS = {
-    "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то", "все",
-    "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за", "бы", "по",
-    "только", "ее", "мне", "было", "вот", "от", "меня", "еще", "нет", "о", "из", "ему",
-    "теперь", "когда", "даже", "ну", "вдруг", "ли", "если", "уже", "или", "ни", "быть",
-    "был", "него", "до", "вас", "нибудь", "опять", "уж", "вам", "ведь", "там", "потом",
-    "себя", "ничего", "ей", "может", "они", "тут", "где", "есть", "надо", "ней", "для",
-    "мы", "тебя", "их", "чем", "была", "сам", "чтоб", "без", "будто", "чего", "раз",
-    "тоже", "себе", "под", "будет", "ж", "тогда", "кто", "этот", "того", "потому",
-    "этого", "какой", "какая", "какое", "какие", "сколько", "каков", "какова", "каковы",
-}
+from pulse.modules.knowledge.index import Chunk, ensure_index, stems
 
 
-def sanitize_terms(query: str) -> list[str]:
-    """Extracts search tokens from natural language query, filtering stop words."""
-    words = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]+", query.lower())
-    return [w for w in words if w not in STOP_WORDS and len(w) >= 2]
+@dataclass(frozen=True, slots=True)
+class Hit:
+    chunk: Chunk
+    score: float  # BM25, higher is better
+    coverage: float  # share of the question's meaningful stems found in the section
 
 
-def search_chunks(query: str, limit: int = 5) -> list[dict[str, Any]]:
-    """Performs FTS5 full-text search with fallback across knowledge chunks."""
-    from pulse.modules.knowledge import store
-
-    store.ensure_seeded()
-    terms = sanitize_terms(query)
+def search(question: str, k: int = 5) -> list[Hit]:
+    ensure_index()
+    terms = sorted(set(stems(question)))
     if not terms:
         return []
-
-    # 1. FTS5 with prefix matching and rank
-    fts_expr = " OR ".join(f'"{t}"*' for t in terms)
-    results: list[dict[str, Any]] = []
-
-    try:
-        with db.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT chunk_id, doc_title, section, text, rank
-                FROM kb_chunks_fts
-                WHERE kb_chunks_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (fts_expr, limit),
-            ).fetchall()
-
-            for r in rows:
-                results.append(
-                    {
-                        "chunk_id": int(r["chunk_id"]),
-                        "title": r["doc_title"],
-                        "section": r["section"],
-                        "text": r["text"],
-                        "score": round(-float(r["rank"]), 2),
-                    }
-                )
-    except Exception:
-        results = []
-
-    if results:
-        return results
-
-    # 2. Fallback LIKE search if FTS yielded no results
-    like_conditions = []
-    params: list[Any] = []
-    for t in terms[:4]:
-        like_conditions.append("(doc_title LIKE ? OR section LIKE ? OR text LIKE ? OR keywords LIKE ?)")
-        params.extend([f"%{t}%", f"%{t}%", f"%{t}%", f"%{t}%"])
-
-    if not like_conditions:
-        return []
-
-    # Safe parameter substitution where like_conditions contains fixed constant templates
-    sql = f"""
-        SELECT id, doc_title, section, text
-        FROM kb_chunks
-        WHERE {" OR ".join(like_conditions)}
-        LIMIT ?
-    """  # noqa: S608
-    params.append(limit)
-
+    expr = " OR ".join(f'"{t}"*' for t in terms)
     with db.connect() as conn:
-        rows = conn.execute(sql, tuple(params)).fetchall()
-        for r in rows:
-            results.append(
-                {
-                    "chunk_id": int(r["id"]),
-                    "title": r["doc_title"],
-                    "section": r["section"],
-                    "text": r["text"],
-                    "score": 1.0,
-                }
-            )
-
-    return results
+        rows = conn.execute(
+            "SELECT c.*, f.stems AS st, bm25(kb_fts) AS rank FROM kb_fts f JOIN kb_chunk c ON c.id = f.rowid "
+            "WHERE kb_fts MATCH ? ORDER BY rank LIMIT ?",
+            (expr, k),
+        ).fetchall()
+    hits = []
+    for r in rows:
+        indexed = r["st"].split()
+        found = sum(1 for t in terms if any(w.startswith(t) for w in indexed))
+        chunk = Chunk(r["id"], r["doc"], r["doc_title"], r["category"], r["section"], r["text"])
+        hits.append(Hit(chunk, round(-float(r["rank"]), 3), round(found / len(terms), 2)))
+    return hits

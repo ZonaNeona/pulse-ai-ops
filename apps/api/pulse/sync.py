@@ -93,8 +93,21 @@ async def reset() -> dict[str, Any]:
     async with _lock:
         story = seed.build()
         counts = await full()
+        _clear_visitors()
         db.log("Система", "сброс демо-данных", f"компания пересоздана на {clock.today():%d.%m.%Y}", "info")
         return {"story": story, "counts": counts}
+
+
+def _clear_visitors() -> None:
+    """Yesterday's documents, drafts and traces describe yesterday's company: everyone starts fresh."""
+    from pulse.agents import trace
+    from pulse.modules.docs import graph, store
+
+    store.clear()
+    trace.clear()
+    with db.connect() as conn:
+        conn.execute("DELETE FROM ai_drafts")
+    graph.checkpoint_path().unlink(missing_ok=True)
 
 
 async def ensure_ready() -> None:

@@ -61,7 +61,8 @@ def _revenue_kpi(data: Data, rev: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def overview(data: Data) -> dict[str, Any]:
+def overview(data: Data, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """`cards` — the AI modules' health, computed by the caller for the visitor's session (see `ai_cards`)."""
     sigs = signals.build(data)
     kpis = {k["key"]: k for k in pulse.kpis(data)}
     rec = integrations.reconciliation(data)
@@ -90,30 +91,6 @@ def overview(data: Data) -> dict[str, Any]:
             else "Всё сходится",
             "detail": f"CRM ↔ 1С за месяц: {fmt.rub_short(gap_sum)}" if rec["gaps"] else "CRM и 1С совпадают",
             "href": "/integrations",
-        },
-        {
-            "id": "docs",
-            "title": "Документы",
-            "status": "danger",
-            "headline": "2 ждут человека",
-            "detail": "Счёт № 2417: сумма больше заказа на 9 000 ₽",
-            "href": "/docs",
-        },
-        {
-            "id": "knowledge",
-            "title": "Знания",
-            "status": "success",
-            "headline": "95% с источником",
-            "detail": "24 регламента, 318 чанков, eval 19/20",
-            "href": "/knowledge",
-        },
-        {
-            "id": "agents",
-            "title": "Агенты",
-            "status": "success",
-            "headline": "В бюджете",
-            "detail": "Hermes Agent: MCP-инструменты, трассировка",
-            "href": "/under-the-hood",
         },
     ]
 
@@ -146,6 +123,7 @@ def overview(data: Data) -> dict[str, Any]:
                 "href": "/integrations",
             }
         )
+    modules += cards or []
     rank = {"high": 0, "medium": 1, "low": 2}
     actions.sort(key=lambda a: rank[a["severity"]])
 
@@ -161,3 +139,39 @@ def overview(data: Data) -> dict[str, Any]:
         "actions": actions[:7],
         "revenue": rev,
     }
+
+
+def ai_cards(pending: list[Any], kb: dict[str, Any], spend: dict[str, Any], runs_today: int) -> list[dict[str, Any]]:
+    """Documents, knowledge and agents cards from live state: the visitor's queue, the last eval, today's spend."""
+    first = pending[0] if pending else None
+    problem = next((c.detail for c in first.checks if not c.ok), "нужна проверка") if first else ""
+    docs = {
+        "id": "docs",
+        "title": "Документы",
+        "status": "danger" if any(d.status == "mismatch" for d in pending) else "warning" if pending else "success",
+        "headline": f"{len(pending)} ждут человека" if pending else "Очередь пуста",
+        "detail": f"№ {first.value('number')}: {problem}" if first else "Всё проверено и проведено",
+        "href": "/docs",
+    }
+    passed, total = kb["evalPassed"], kb["evalTotal"]
+    knowledge = {
+        "id": "knowledge",
+        "title": "Знания",
+        "status": "success" if total and passed == total else "warning",
+        "headline": f"Эталон {passed} из {total}",
+        "detail": f"{fmt.count(kb['documents'], ('регламент', 'регламента', 'регламентов'))}, "
+        f"отказы вне базы {kb['refusalsCorrect']} из {kb['refusalsTotal']}",
+        "href": "/knowledge",
+    }
+    share = spend["spentUsd"] / spend["capUsd"] if spend["capUsd"] else 0
+    agents = {
+        "id": "agents",
+        "title": "Агенты",
+        "status": "danger" if share >= 1 else "warning" if share > 0.8 or not spend["modelConnected"] else "success",
+        "headline": f"${spend['spentUsd']:.2f} из ${spend['capUsd']:.2f}".replace(".", ","),
+        "detail": (fmt.count(runs_today, ("ход", "хода", "ходов")) + " агента сегодня")
+        if spend["modelConnected"]
+        else "Модель не подключена: работают готовые ответы",
+        "href": "/under-the-hood",
+    }
+    return [docs, knowledge, agents]

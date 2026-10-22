@@ -1,157 +1,104 @@
-"""Tests for Telegram bot handlers, webhook dispatching, and WebApp security."""
+"""Telegram bot: the webhook is closed without the secret, replies come from the same modules as the screens."""
 
-import hashlib
-import hmac
-import time
+from collections.abc import AsyncGenerator, Iterator
+from datetime import datetime
 from typing import Any
 
 import pytest
-from starlette.testclient import TestClient
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.base import BaseSession
+from aiogram.methods import SendMessage, TelegramMethod
+from aiogram.types import Chat, Message
+from fastapi.testclient import TestClient
 
-from pulse.bot import feed_update, get_status, validate_init_data
-from pulse.core import db
+from pulse.bot import handlers, service
+from pulse.core.config import get_settings
 from pulse.main import app
-from pulse.modules import docs as docs_mod
+
+TOKEN = "123456:TEST-token-for-tests"
 
 
-def _generate_test_init_data(bot_token: str, user_id: int = 123456) -> str:
-    auth_date = int(time.time())
-    data_dict = {
-        "auth_date": str(auth_date),
-        "query_id": "AAHdF6IQAAAAAN0XohDhrOrc",
-        "user": f'{{"id":{user_id},"first_name":"Иван","username":"ivan_nord"}}',
+class Capture(BaseSession):
+    """Records what the bot sends instead of calling Telegram."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: list[TelegramMethod[Any]] = []
+
+    async def make_request(self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None) -> Any:  # noqa: ASYNC109
+        self.sent.append(method)
+        if isinstance(method, SendMessage):
+            return Message(
+                message_id=len(self.sent), date=datetime.now(), chat=Chat(id=1, type="private"), text=method.text
+            )
+        return True
+
+    async def stream_content(self, *args: Any, **kwargs: Any) -> AsyncGenerator[bytes, None]:  # pragma: no cover
+        yield b""
+
+    async def close(self) -> None:
+        pass
+
+    def texts(self) -> list[str]:
+        return [m.text for m in self.sent if isinstance(m, SendMessage)]
+
+
+@pytest.fixture
+def telegram(monkeypatch: pytest.MonkeyPatch) -> Iterator[Capture]:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
+    get_settings.cache_clear()
+    capture = Capture()
+    service._bot = Bot(TOKEN, session=capture, default=DefaultBotProperties(parse_mode="HTML"))
+    yield capture
+    service._bot = None  # the dispatcher and its router are kept: a router attaches once
+
+
+def update(text: str, user: int = 42) -> dict[str, Any]:
+    chat = {"id": user, "type": "private"}
+    sender = {"id": user, "is_bot": False, "first_name": "Гость"}
+    return {
+        "update_id": 1,
+        "message": {"message_id": 1, "date": 1_760_000_000, "chat": chat, "from": sender, "text": text},
     }
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
-    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-    calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-    data_dict["hash"] = calc_hash
-    return "&".join(f"{k}={v}" for k, v in data_dict.items())
 
 
-def test_validate_init_data() -> None:
-    """Tests Telegram initData HMAC-SHA256 signature validation."""
-    token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-    valid_data = _generate_test_init_data(token, 101)
-
-    assert validate_init_data(valid_data, token) is True
-    # Tampered data
-    tampered_data = valid_data.replace("ivan_nord", "hacker")
-    assert validate_init_data(tampered_data, token) is False
-    # Empty string
-    assert validate_init_data("", token) is False
-
-
-def test_bot_status_endpoint() -> None:
-    """Tests GET /api/bot/status."""
-    status_direct = get_status()
-    assert "commands" in status_direct
-
+def test_webhook_is_closed_without_a_bot_or_with_a_wrong_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
-    resp = client.get("/api/bot/status")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "configured" in data
-    assert "miniAppUrl" in data
-    assert len(data["commands"]) >= 4
-    cmds = [c["command"] for c in data["commands"]]
-    assert "/start" in cmds
-    assert "/today" in cmds
-    assert "/team" in cmds
-    assert "/doc" in cmds
+    assert client.post("/api/bot/webhook", json=update("/start")).status_code == 403
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
+    get_settings.cache_clear()
+    wrong = {"X-Telegram-Bot-Api-Secret-Token": "guess"}
+    assert client.post("/api/bot/webhook", json=update("/start"), headers=wrong).status_code == 403
 
 
-def test_validate_init_data_endpoint() -> None:
-    """Tests POST /api/bot/validate_init_data."""
-    client = TestClient(app)
-    resp = client.post("/api/bot/validate_init_data", json={"init_data": "user=123&hash=abc"})
-    assert resp.status_code == 200
-    assert "valid" in resp.json()
+async def test_doc_command_shows_the_visitors_queue_with_decision_buttons(ready: None, telegram: Capture) -> None:
+    await service.feed(update("/doc"))
+    [text] = telegram.texts()
+    assert "№ 2417" in text and "❌ Сумма совпадает с заказом" in text
+    markup = next(m for m in telegram.sent if isinstance(m, SendMessage)).reply_markup
+    assert [b.text for b in markup.inline_keyboard[0]] == ["Провести", "Отклонить"]  # type: ignore[union-attr]
 
 
-@pytest.mark.asyncio
-async def test_bot_webhook_feed_updates() -> None:
-    """Feeds simulated Telegram updates (/start, /today, /team, /doc) through the dispatcher."""
-    db.init()
-    docs_mod.list_docs()
-
-    # 1. /start update
-    start_update: dict[str, Any] = {
-        "update_id": 1001,
-        "message": {
-            "message_id": 1,
-            "date": int(time.time()),
-            "chat": {"id": 999001, "type": "private"},
-            "from": {"id": 999001, "is_bot": False, "first_name": "Тестер"},
-            "text": "/start",
-        },
-    }
-    await feed_update(start_update)
-
-    # 2. /today update
-    today_update: dict[str, Any] = {
-        "update_id": 1002,
-        "message": {
-            "message_id": 2,
-            "date": int(time.time()),
-            "chat": {"id": 999001, "type": "private"},
-            "from": {"id": 999001, "is_bot": False, "first_name": "Тестер"},
-            "text": "/today",
-        },
-    }
-    await feed_update(today_update)
-
-    # 3. /team update
-    team_update: dict[str, Any] = {
-        "update_id": 1003,
-        "message": {
-            "message_id": 3,
-            "date": int(time.time()),
-            "chat": {"id": 999001, "type": "private"},
-            "from": {"id": 999001, "is_bot": False, "first_name": "Тестер"},
-            "text": "/team",
-        },
-    }
-    await feed_update(team_update)
-
-    # 4. /doc update
-    doc_update: dict[str, Any] = {
-        "update_id": 1004,
-        "message": {
-            "message_id": 4,
-            "date": int(time.time()),
-            "chat": {"id": 999001, "type": "private"},
-            "from": {"id": 999001, "is_bot": False, "first_name": "Тестер"},
-            "text": "/doc",
-        },
-    }
-    await feed_update(doc_update)
+async def test_text_question_is_answered_by_the_copilot(ready: None, telegram: Capture) -> None:
+    await service.feed(update("Какие сделки зависли больше 7 дней?"))
+    [text] = telegram.texts()
+    assert "без движения" in text and "<b>" in text and "**" not in text
 
 
-@pytest.mark.asyncio
-async def test_bot_callback_confirm_doc() -> None:
-    """Tests confirming a document through Telegram callback query."""
-    db.init()
-    docs_mod.list_docs()
+async def test_secret_header_lets_telegram_in(ready: None, telegram: Capture) -> None:
+    headers = {"X-Telegram-Bot-Api-Secret-Token": service.secret()}
+    response = TestClient(app).post("/api/bot/webhook", json=update("/start"), headers=headers)
+    assert response.status_code == 200
+    assert "Норд Инжиниринг" in telegram.texts()[0]
 
-    # Callback query for confirm_doc:1
-    callback_update: dict[str, Any] = {
-        "update_id": 2001,
-        "callback_query": {
-            "id": "cb_query_123",
-            "from": {"id": 999001, "is_bot": False, "first_name": "Тестер"},
-            "message": {
-                "message_id": 10,
-                "date": int(time.time()),
-                "chat": {"id": 999001, "type": "private"},
-                "text": "Входящий документ ждёт подтверждения",
-            },
-            "chat_instance": "123456",
-            "data": "confirm_doc:1",
-        },
-    }
-    await feed_update(callback_update)
 
-    # Verify document 1 was confirmed in SQLite
-    doc = docs_mod.get_doc(1)
-    assert doc is not None
-    assert doc.status == "posted"
+def test_rich_text_escapes_html_and_keeps_bold() -> None:
+    assert handlers.rich("**7 сделок** <script>") == "<b>7 сделок</b> &lt;script&gt;"
+
+
+def test_each_telegram_user_is_a_separate_visitor() -> None:
+    from aiogram.types import User
+
+    a, b = (handlers.who(User(id=i, is_bot=False, first_name="x")) for i in (1, 2))
+    assert a.session != b.session and a.quota != b.quota

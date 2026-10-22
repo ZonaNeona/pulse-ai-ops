@@ -2,13 +2,20 @@ import clsx from 'clsx'
 import { CornerDownLeft, Moon, Search, Sun } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { PRESETS } from '@/mock/demo'
+import { PRESETS } from '@/app/presets'
 import { Kbd } from '@/ui/kit'
 import { NAV } from './nav'
 import { navigate, withQuery } from './router'
 import { useTheme } from './theme'
 
-type Command = { id: string; label: string; hint?: string; group: string; icon: React.ReactNode; run: () => void }
+type Command = {
+  id: string
+  label: string
+  hint?: string
+  group: string
+  icon: React.ReactNode
+  run: () => void
+}
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [query, setQuery] = useState('')
@@ -122,7 +129,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 lastGroup = c.group
                 return (
                   <div key={c.id}>
-                    {header && <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-faint">{c.group}</div>}
+                    {header && (
+                      <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-faint">{c.group}</div>
+                    )}
                     <button
                       onMouseMove={() => setIndex(i)}
                       onClick={() => choose(c)}

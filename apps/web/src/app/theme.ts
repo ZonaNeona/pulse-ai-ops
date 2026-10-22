@@ -42,12 +42,9 @@ export function initTheme() {
 }
 
 export function useTheme(): [Theme, () => void] {
-  const theme = useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb)
-      return () => listeners.delete(cb)
-    },
-    currentTheme,
-  )
+  const theme = useSyncExternalStore((cb) => {
+    listeners.add(cb)
+    return () => listeners.delete(cb)
+  }, currentTheme)
   return [theme, () => applyTheme(theme === 'dark' ? 'light' : 'dark', true)]
 }

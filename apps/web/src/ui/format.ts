@@ -1,7 +1,11 @@
 import type { Kpi } from '@/api/types'
 
 const nf = new Intl.NumberFormat('ru-RU')
-const rubFmt = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 })
+const rubFmt = new Intl.NumberFormat('ru-RU', {
+  style: 'currency',
+  currency: 'RUB',
+  maximumFractionDigits: 0,
+})
 export const num = (v: number) => nf.format(v)
 export const rub = (v: number) => rubFmt.format(v)
 /** $0,0061 for per-call costs, $0,42 for totals. */

@@ -1,149 +1,59 @@
-"""MCPServer (FastMCP stdio) exposing Pulse tools for Hermes Agent.
+"""MCP server over the tool registry, for Hermes Agent and any MCP client (Claude Desktop, IDE agents).
 
-Launched by Hermes profile or any MCP-compatible AI agent.
-Uses the unified tool registry from pulse.agents.tools.
+Hermes spawns it over stdio. The tool list is generated from `tools.TOOLS` — there is no second copy of
+names, descriptions or schemas to drift apart. The visitor session of the current turn comes from the
+turn file written by `agents.hermes`, so drafts land in the right visitor's list.
+
+    python -m pulse.agents.mcp_server
 """
 
+import json
 from typing import Any
 
-from mcp.server.mcpserver import MCPServer
+import anyio
+from mcp import types
+from mcp.server.lowlevel import Server
+from mcp.server.stdio import stdio_server
 
 from pulse.agents import tools
 
-server = MCPServer("pulse-ops")
+
+async def list_tools(ctx: Any, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
+    return types.ListToolsResult(
+        tools=[
+            types.Tool(name=t.name, description=t.description, input_schema=t.parameters) for t in tools.TOOLS.values()
+        ]
+    )
 
 
-# Register all tools from the unified registry into the MCP server
-@server.tool(
-    name="sales_pulse",
-    description="Получить сводный пульс продаж за сегодня: ключевые KPI, выручку к плану, количество аномалий.",
+async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+    if params.name not in tools.TOOLS:
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=f"Нет инструмента {params.name}")], is_error=True
+        )
+    token = tools.session.set(tools.current_session())
+    try:
+        result = await tools.run(params.name, dict(params.arguments or {}))
+    finally:
+        tools.session.reset(token)
+    failed = isinstance(result, dict) and "error" in result
+    text = json.dumps(result, ensure_ascii=False, default=str)
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=failed)
+
+
+server = Server(
+    "pulse-ops",
+    version="1.0",
+    instructions="Инструменты демо-стенда «Пульс»: CRM, 1С, документы, регламенты.",
+    on_list_tools=list_tools,
+    on_call_tool=call_tool,
 )
-def mcp_sales_pulse() -> dict[str, Any]:
-    return tools.tool_sales_pulse()
 
 
-@server.tool(
-    name="get_signals",
-    description="Активные сигналы РОПа: пропущенные звонки, зависшие сделки, просрочки.",
-)
-def mcp_get_signals(limit: int = 10, severity: str = "") -> list[dict[str, Any]]:
-    return tools.tool_get_signals(limit, severity)
-
-
-@server.tool(
-    name="team_status",
-    description="Статус менеджеров: звонки, нормы, время разговора, оценка качества и отставания.",
-)
-def mcp_team_status() -> list[dict[str, Any]]:
-    return tools.tool_team_status()
-
-
-
-@server.tool(
-    name="get_deals",
-    description="Получить список сделок CRM с фильтрацией по стадии, менеджеру или признаку застревания.",
-)
-def mcp_get_deals(
-    stage: str = "", manager: str = "", stale_only: bool = False, limit: int = 20
-) -> list[dict[str, Any]]:
-    return tools.tool_get_deals(stage, manager, stale_only, limit)
-
-
-@server.tool(
-    name="deal_details",
-    description="Получить подробную информацию по конкретной сделке CRM по её ID.",
-)
-def mcp_deal_details(deal_id: int) -> dict[str, Any]:
-    return tools.tool_deal_details(deal_id)
-
-
-@server.tool(
-    name="call_review",
-    description="Получить аналитический разбор звонка: оценка 0-100, критерии чек-листа, цитаты из речи и совет РОПа.",
-)
-def mcp_call_review(call_id: int) -> dict[str, Any]:
-    return tools.tool_call_review(call_id)
-
-
-@server.tool(
-    name="reconciliation",
-    description="Сверить продажи CRM (Битрикс24) с реализациями в 1С: суммы и список расхождений.",
-)
-def mcp_reconciliation() -> dict[str, Any]:
-
-    return tools.tool_reconciliation()
-
-
-@server.tool(
-    name="erp_stock",
-    description="Проверить остатки и резервы оборудования на складе в 1С.",
-)
-def mcp_erp_stock(query: str = "") -> list[dict[str, Any]]:
-    return tools.tool_erp_stock(query)
-
-
-@server.tool(
-    name="draft_task",
-    description="Сформировать черновик задачи в CRM. Действие выполняется ТОЛЬКО после подтверждения пользователем.",
-)
-def mcp_draft_task(
-    title: str, responsible: str, deal_id: int | None = None, deadline_days: int = 1
-) -> dict[str, Any]:
-    return tools.tool_draft_task(title, responsible, deal_id, deadline_days)
-
-
-@server.tool(
-    name="confirm_draft",
-    description="Подтвердить применение ранее созданного черновика (Human-in-the-loop).",
-)
-def mcp_confirm_draft(draft_id: str) -> dict[str, Any]:
-    return tools.tool_confirm_draft(draft_id)
-
-
-@server.tool(
-    name="undo_draft",
-    description="Отменить черновик задачи или изменения.",
-)
-def mcp_undo_draft(draft_id: str) -> dict[str, Any]:
-    return tools.tool_undo_draft(draft_id)
-
-
-@server.tool(
-    name="docs_queue",
-    description="Очередь входящих документов (счета, акты, УПД, договоры), ожидающих подтверждения человека.",
-)
-def mcp_docs_queue() -> list[dict[str, Any]]:
-    return tools.tool_docs_queue()
-
-
-@server.tool(
-    name="review_doc",
-    description="Проверить статус документа, шаги графа LangGraph и расхождения со сверкой 1С/CRM.",
-)
-def mcp_review_doc(doc_id: int) -> dict[str, Any]:
-    return tools.tool_review_doc(doc_id)
-
-
-@server.tool(
-    name="confirm_doc",
-    description="Подтвердить проводку документа в 1С (Human-in-the-loop).",
-)
-def mcp_confirm_doc(doc_id: int) -> dict[str, Any]:
-    return tools.tool_confirm_doc(doc_id)
-
-
-@server.tool(
-    name="knowledge_search",
-    description="Поиск по базе регламентов компании 'Норд Инжиниринг' (цены, скидки, гарантии, стандарты монтажа).",
-)
-def mcp_knowledge_search(query: str, limit: int = 3) -> dict[str, Any]:
-    return tools.tool_knowledge_search(query, limit)
-
-
-
-def main() -> None:
-    server.run(transport="stdio")
+async def serve() -> None:
+    async with stdio_server() as (read, write):
+        await server.run(read, write, server.create_initialization_options())
 
 
 if __name__ == "__main__":
-    main()
+    anyio.run(serve)

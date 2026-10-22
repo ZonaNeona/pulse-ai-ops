@@ -9,7 +9,9 @@ const RESPONSES: Record<string, unknown> = { '/api/overview': OVERVIEW, '/api/bu
 beforeAll(() => {
   window.matchMedia ??= (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
   vi.stubGlobal('fetch', (url: string) =>
-    Promise.resolve(new Response(JSON.stringify(RESPONSES[url] ?? {}), { status: url in RESPONSES ? 200 : 404 })),
+    Promise.resolve(
+      new Response(JSON.stringify(RESPONSES[url] ?? {}), { status: url in RESPONSES ? 200 : 404 }),
+    ),
   )
 })
 

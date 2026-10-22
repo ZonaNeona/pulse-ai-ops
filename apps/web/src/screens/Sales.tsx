@@ -85,7 +85,10 @@ function PulseTab() {
         </Card>
         <Card padded={false}>
           <div className="px-4 pt-4">
-            <CardHeader title="Сигналы" hint={`${count(data.signals.length, ['правило сработало', 'правила сработали', 'правил сработало'])}`} />
+            <CardHeader
+              title="Сигналы"
+              hint={`${count(data.signals.length, ['правило сработало', 'правила сработали', 'правил сработало'])}`}
+            />
           </div>
           <ul className="divide-y divide-line border-t border-line">
             {data.signals.map((s) => (
@@ -99,7 +102,12 @@ function PulseTab() {
                     </div>
                     <div className="mt-0.5 text-sm font-medium text-ink">{s.title}</div>
                     <div className="mt-0.5 text-xs text-muted">{s.reason}</div>
-                    <Button size="sm" variant="secondary" className="mt-2" onClick={() => navigate(s.href ?? '/sales')}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={() => navigate(s.href ?? '/sales')}
+                    >
                       {s.action}
                     </Button>
                   </div>
@@ -168,16 +176,30 @@ function TeamTab() {
                     </td>
                     <td className="num px-3 py-3 text-ink">{m.talkMin}</td>
                     <td className="px-3 py-3">
-                      <Ring value={m.quality} max={100} size={32} stroke={3} tone={m.quality >= 75 ? 'success' : m.quality >= 60 ? 'warning' : 'danger'}>
+                      <Ring
+                        value={m.quality}
+                        max={100}
+                        size={32}
+                        stroke={3}
+                        tone={m.quality >= 75 ? 'success' : m.quality >= 60 ? 'warning' : 'danger'}
+                      >
                         {m.quality}
                       </Ring>
                     </td>
                     <td className="px-3 py-3">
-                      {m.overdue ? <Badge tone={m.overdue > 3 ? 'danger' : 'warning'}>{m.overdue}</Badge> : <span className="text-faint">—</span>}
+                      {m.overdue ? (
+                        <Badge tone={m.overdue > 3 ? 'danger' : 'warning'}>{m.overdue}</Badge>
+                      ) : (
+                        <span className="text-faint">—</span>
+                      )}
                     </td>
                     <td className="num px-3 py-3 text-right text-ink">{rubShort(m.pipeline)}</td>
                     <td className="w-32 px-4 py-3">
-                      <Sparkline values={m.trend} tone={m.status === 'danger' ? 'danger' : 'accent'} height={22} />
+                      <Sparkline
+                        values={m.trend}
+                        tone={m.status === 'danger' ? 'danger' : 'accent'}
+                        height={22}
+                      />
                     </td>
                   </tr>
                 )
@@ -199,15 +221,24 @@ function TeamTab() {
             </dl>
             <div>
               <div className="mb-2 text-xs text-muted">Звонки за 10 дней</div>
-              <Sparkline values={open.trend} height={56} tone={open.status === 'danger' ? 'danger' : 'accent'} />
+              <Sparkline
+                values={open.trend}
+                height={56}
+                tone={open.status === 'danger' ? 'danger' : 'accent'}
+              />
             </div>
             <Card className="bg-surface-2/50">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <Sparkles size={14} className="text-accent" /> Вывод копилота
               </div>
-              <p className="mt-1.5 text-sm text-ink-2">{open.note}. Подробности — в разборе звонков и сделках менеджера.</p>
+              <p className="mt-1.5 text-sm text-ink-2">
+                {open.note}. Подробности — в разборе звонков и сделках менеджера.
+              </p>
             </Card>
-            <Button variant="secondary" onClick={() => navigate(withQuery('/sales/calls', { manager: String(open.id) }))}>
+            <Button
+              variant="secondary"
+              onClick={() => navigate(withQuery('/sales/calls', { manager: String(open.id) }))}
+            >
               Звонки менеджера
             </Button>
           </div>
@@ -228,9 +259,14 @@ function DealsTab() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Segmented options={funnels.map((f) => ({ id: f.id, label: f.name }))} value={current.id} onChange={setFunnel} />
+        <Segmented
+          options={funnels.map((f) => ({ id: f.id, label: f.name }))}
+          value={current.id}
+          onChange={setFunnel}
+        />
         <span className="num text-sm text-muted">
-          {count(inFunnel.length, ['сделка', 'сделки', 'сделок'])} · {rubShort(inFunnel.reduce((s, d) => s + d.amount, 0))}
+          {count(inFunnel.length, ['сделка', 'сделки', 'сделок'])} ·{' '}
+          {rubShort(inFunnel.reduce((s, d) => s + d.amount, 0))}
         </span>
       </div>
       <div className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
@@ -253,7 +289,9 @@ function DealsTab() {
                     <div className="mt-2 flex items-center justify-between">
                       <span className="num text-sm font-medium text-ink">{rubShort(d.amount)}</span>
                       {d.daysIdle >= 7 ? (
-                        <Badge tone={d.daysIdle >= 10 ? 'danger' : 'warning'}>{d.daysIdle} дн без движения</Badge>
+                        <Badge tone={d.daysIdle >= 10 ? 'danger' : 'warning'}>
+                          {d.daysIdle} дн без движения
+                        </Badge>
                       ) : (
                         <span className="text-xs text-faint">{d.nextStep}</span>
                       )}
@@ -299,7 +337,9 @@ function CallsTab() {
       <Card padded={false}>
         {manager && (
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5 text-sm">
-            <span className="text-muted">Звонки менеджера: {list[0]?.manager ?? '—'} · сегодня и в прошлый рабочий день</span>
+            <span className="text-muted">
+              Звонки менеджера: {list[0]?.manager ?? '—'} · сегодня и в прошлый рабочий день
+            </span>
             <Button size="sm" variant="ghost" onClick={() => navigate('/sales/calls')}>
               Показать всех
             </Button>
@@ -345,7 +385,13 @@ function CallRow({ call, onOpen }: { call: Call; onOpen: () => void }) {
             call.missed ? 'bg-danger-soft text-danger' : 'bg-surface-2 text-muted',
           )}
         >
-          {call.missed ? <PhoneMissed size={14} /> : call.direction === 'in' ? <ArrowDownLeft size={14} /> : <ArrowUpRight size={14} />}
+          {call.missed ? (
+            <PhoneMissed size={14} />
+          ) : call.direction === 'in' ? (
+            <ArrowDownLeft size={14} />
+          ) : (
+            <ArrowUpRight size={14} />
+          )}
         </span>
         <span className="num w-12 text-muted">{call.at}</span>
         <span className="min-w-0 flex-1">
@@ -354,9 +400,15 @@ function CallRow({ call, onOpen }: { call: Call; onOpen: () => void }) {
             {call.manager} · {call.outcome}
           </span>
         </span>
-        <span className="num hidden w-12 text-right text-muted sm:block">{call.missed ? '—' : duration(call.durationSec)}</span>
+        <span className="num hidden w-12 text-right text-muted sm:block">
+          {call.missed ? '—' : duration(call.durationSec)}
+        </span>
         <span className="w-14 text-right">
-          {call.score !== null ? <Badge tone={scoreTone(call.score)}>{call.score}</Badge> : <span className="text-faint">—</span>}
+          {call.score !== null ? (
+            <Badge tone={scoreTone(call.score)}>{call.score}</Badge>
+          ) : (
+            <span className="text-faint">—</span>
+          )}
         </span>
       </button>
     </li>
@@ -422,7 +474,12 @@ function CallSheet({ id, onClose }: { id: number | null; onClose: () => void }) 
                       {c.score} / {c.max}
                     </span>
                   </div>
-                  <Meter value={c.score} max={c.max} tone={scoreTone((c.score / c.max) * 100)} className="mt-1" />
+                  <Meter
+                    value={c.score}
+                    max={c.max}
+                    tone={scoreTone((c.score / c.max) * 100)}
+                    className="mt-1"
+                  />
                   <div className="mt-1 text-xs text-muted">
                     {c.comment}
                     {c.quote && <span className="text-ink-2"> — «{c.quote}»</span>}
@@ -450,7 +507,12 @@ function CallSheet({ id, onClose }: { id: number | null; onClose: () => void }) 
               {data.transcript.map((l, i) => (
                 <li key={i} className="flex gap-3 text-sm">
                   <span className="mono w-10 shrink-0 pt-px text-xs text-faint">{duration(l.t)}</span>
-                  <span className={clsx('w-16 shrink-0 text-xs pt-0.5', l.speaker === 'manager' ? 'text-accent' : 'text-muted')}>
+                  <span
+                    className={clsx(
+                      'w-16 shrink-0 text-xs pt-0.5',
+                      l.speaker === 'manager' ? 'text-accent' : 'text-muted',
+                    )}
+                  >
                     {l.speaker === 'manager' ? 'Менеджер' : 'Клиент'}
                   </span>
                   <span className="text-ink-2">{l.mark ? <mark>{l.text}</mark> : l.text}</span>

@@ -1,9 +1,10 @@
-"""Daily budget and per-visitor limits on AI calls (USD).
+"""Daily AI budget (USD) and per-visitor limits.
 
-Protects against run-away agent tool loops and visitor scraping.
-Uses a two-phase reserve/settle pattern adapted for OpenRouter USD costs.
+Two-phase: `reserve` books the estimated cost before a model call and fails if the day's cap or the
+visitor's quota is used up; `settle` replaces the estimate with the real cost the provider reported.
+A failed call settles at zero, a call without a reported cost keeps its estimate — the cap is never
+undercounted.
 """
-
 
 import json
 import uuid
@@ -12,159 +13,110 @@ from typing import Any
 from pulse.core import clock, db
 from pulse.core.config import get_settings
 
+QUOTA_ACTIONS = ("question", "document")
 
-def today_str() -> str:
+
+def _day() -> str:
     return clock.today().isoformat()
 
 
-def can_spend(
-    visitor_id: str, action: str = "question", estimated_usd: float = 0.005
-) -> tuple[bool, str]:
-    """Check if the global daily cap or per-visitor limits are exhausted."""
-    settings = get_settings()
-    cap = settings.ai_daily_usd
-    day = today_str()
+def _spent(conn: Any, day: str) -> float:
+    row = conn.execute(
+        "SELECT coalesce(sum(coalesce(actual_usd, estimated_usd)), 0) FROM ai_usage WHERE day = ? AND status != "
+        "'failed'",
+        (day,),
+    ).fetchone()
+    return float(row[0])
 
+
+def _used(conn: Any, day: str, visitor: str, action: str) -> int:
+    row = conn.execute(
+        "SELECT count(*) FROM ai_usage WHERE day = ? AND visitor_id = ? AND action = ? AND status != 'failed'",
+        (day, visitor, action),
+    ).fetchone()
+    return int(row[0])
+
+
+def _quota(action: str) -> int:
+    s = get_settings()
+    return s.ai_visitor_documents if action == "document" else s.ai_visitor_questions
+
+
+def reserve(visitor: str, action: str, estimated_usd: float) -> str:
+    """Book a model call. Raises RuntimeError with a visitor-facing reason when it is not allowed."""
+    s = get_settings()
+    day, now = _day(), clock.now()
     with db.connect() as conn:
-        row = conn.execute(
-            "SELECT coalesce(sum(coalesce(actual_usd, estimated_usd)), 0) FROM ai_usage WHERE day = ?",
-            (day,),
-        ).fetchone()
-        spent = float(row[0]) if row else 0.0
-
-        if spent + estimated_usd > cap:
-            return (
-                False,
-                f"Суточный лимит ИИ (${cap:.2f}) исчерпан. Показываем ответы из кэша.",
+        conn.execute("BEGIN IMMEDIATE")  # cap check and insert are one step for concurrent requests
+        if _spent(conn, day) + estimated_usd > s.ai_daily_usd:
+            raise RuntimeError(
+                f"Дневной бюджет ИИ стенда (${s.ai_daily_usd:.2f}) исчерпан — до завтра работают готовые ответы"
             )
-
-        if visitor_id:
-            v_row = conn.execute(
-                "SELECT count(*) FROM ai_usage WHERE day = ? AND visitor_id = ? AND action = ?",
-                (day, visitor_id, action),
-            ).fetchone()
-            used_count = int(v_row[0]) if v_row else 0
-
-            max_allowed = (
-                settings.ai_visitor_questions
-                if action == "question"
-                else settings.ai_visitor_documents
-            )
-            if used_count >= max_allowed:
-                return (
-                    False,
-                    f"Ваш лимит на сегодня ({max_allowed} {action}) исчерпан. Используйте готовые вопросы.",
-                )
-
-    return True, ""
-
-
-def reserve(
-    visitor_id: str, action: str, estimated_usd: float, details: dict[str, Any] | None = None
-) -> str:
-    """Reserve USD amount before invoking a model. Raises RuntimeError if cap reached."""
-    ok, reason = can_spend(visitor_id, action, estimated_usd)
-    if not ok:
-        raise RuntimeError(reason)
-
-    settings = get_settings()
-    now = clock.now()
-    day = today_str()
-    hour = now.hour
-    reserve_id = f"res_{uuid.uuid4().hex[:12]}"
-
-    with db.connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        # Re-check inside transaction
-        row = conn.execute(
-            "SELECT coalesce(sum(coalesce(actual_usd, estimated_usd)), 0) FROM ai_usage WHERE day = ?",
-            (day,),
-        ).fetchone()
-        spent = float(row[0]) if row else 0.0
-        if spent + estimated_usd > settings.ai_daily_usd:
-            raise RuntimeError(f"Суточный лимит ИИ (${settings.ai_daily_usd:.2f}) исчерпан.")
-
+        if action in QUOTA_ACTIONS and _used(conn, day, visitor, action) >= _quota(action):
+            what = "вопросов" if action == "question" else "документов"
+            raise RuntimeError(f"Лимит {_quota(action)} {what} в день на посетителя исчерпан — готовые ответы доступны")
+        rid = f"res_{uuid.uuid4().hex[:12]}"
         conn.execute(
-            "INSERT INTO ai_usage(id, day, hour, visitor_id, action, estimated_usd, "
-            "actual_usd, status, details, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                reserve_id,
-                day,
-                hour,
-                visitor_id or "anonymous",
-                action,
-                estimated_usd,
-                None,
-                "reserved",
-                json.dumps(details or {}, ensure_ascii=False),
-                now.isoformat(),
-            ),
+            "INSERT INTO ai_usage(id, day, hour, visitor_id, action, estimated_usd, actual_usd, status, details, "
+            "created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, NULL, 'reserved', '{}', ?)",
+            (rid, day, now.hour, visitor, action, estimated_usd, now.isoformat()),
         )
+    return rid
 
 
-    return reserve_id
-
-
-def settle(
-    reserve_id: str,
-    actual_usd: float | None = None,
-    details: dict[str, Any] | None = None,
-) -> None:
-    """Settle the reservation with actual cost after LLM completion."""
+def settle(reserve_id: str, actual_usd: float, details: dict[str, Any] | None = None) -> None:
+    """Record the real cost. `actual_usd == 0` with an error in details marks the call failed (not counted)."""
+    failed = bool(details and details.get("error"))
     with db.connect() as conn:
         conn.execute(
-            "UPDATE ai_usage SET actual_usd = ?, status = ?, details = ? WHERE id = ?",
+            "UPDATE ai_usage SET actual_usd = CASE WHEN ? > 0 THEN ? ELSE actual_usd END, status = ?, details = ? "
+            "WHERE id = ?",
             (
                 actual_usd,
-                "settled" if actual_usd is not None else "failed",
+                actual_usd,
+                "failed" if failed else "settled",
                 json.dumps(details or {}, ensure_ascii=False),
                 reserve_id,
             ),
         )
 
 
-
-def summary(visitor_id: str = "") -> dict[str, Any]:
-    """Summary of daily AI spend and visitor's quota."""
-    settings = get_settings()
-    day = today_str()
-
+def add_cost(visitor: str, action: str, usd: float) -> None:
+    """Extra model turns inside one already-booked request (tool loops): cost only, no quota use."""
+    now = clock.now()
     with db.connect() as conn:
-        row = conn.execute(
-            "SELECT coalesce(sum(coalesce(actual_usd, estimated_usd)), 0) FROM ai_usage WHERE day = ?",
-            (day,),
-        ).fetchone()
-        spent = float(row[0]) if row else 0.0
+        conn.execute(
+            "INSERT INTO ai_usage(id, day, hour, visitor_id, action, estimated_usd, actual_usd, status, details, "
+            "created_at) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, 'settled', '{}', ?)",
+            (f"add_{uuid.uuid4().hex[:12]}", _day(), now.hour, visitor, f"{action}:turn", usd, now.isoformat()),
+        )
 
-        by_hour = [0] * 24
-        hour_rows = conn.execute(
-            "SELECT hour, count(*) FROM ai_usage WHERE day = ? GROUP BY hour",
+
+def summary(visitor: str = "") -> dict[str, Any]:
+    s = get_settings()
+    day = _day()
+    with db.connect() as conn:
+        spent = _spent(conn, day)
+        hours = conn.execute(
+            "SELECT hour, count(*) FROM ai_usage WHERE day = ? AND action IN ('question', 'document') AND status != "
+            "'failed' "
+            "GROUP BY hour",
             (day,),
         ).fetchall()
-        for h, cnt in hour_rows:
-            if 0 <= h < 24:
-                by_hour[h] = cnt
-
-        questions_used = 0
-        docs_used = 0
-        if visitor_id:
-            v_rows = conn.execute(
-                "SELECT action, count(*) FROM ai_usage WHERE day = ? AND visitor_id = ? GROUP BY action",
-                (day, visitor_id),
-            ).fetchall()
-            for act, cnt in v_rows:
-                if act == "question":
-                    questions_used = cnt
-                elif act == "document":
-                    docs_used = cnt
-
+        q = _used(conn, day, visitor, "question") if visitor else 0
+        d = _used(conn, day, visitor, "document") if visitor else 0
+    by_hour = [0] * 24
+    for h, n in hours:
+        by_hour[int(h)] = int(n)
     return {
         "spentUsd": round(spent, 4),
-        "capUsd": settings.ai_daily_usd,
-        "questionsLeft": max(0, settings.ai_visitor_questions - questions_used),
-        "questionsCap": settings.ai_visitor_questions,
-        "documentsLeft": max(0, settings.ai_visitor_documents - docs_used),
-        "documentsCap": settings.ai_visitor_documents,
+        "capUsd": s.ai_daily_usd,
+        "questionsLeft": max(0, s.ai_visitor_questions - q),
+        "questionsCap": s.ai_visitor_questions,
+        "documentsLeft": max(0, s.ai_visitor_documents - d),
+        "documentsCap": s.ai_visitor_documents,
         "byHour": by_hour,
+        "modelConnected": bool(s.llm_api_key),
     }

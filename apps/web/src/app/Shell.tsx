@@ -44,12 +44,19 @@ function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; on
     >
       <item.icon size={16} className={active ? 'text-accent' : 'text-faint group-hover:text-muted'} />
       <span className="flex-1">{item.label}</span>
-      {item.soon && <span className="rounded-sm bg-surface-2 px-1 text-[10px] font-medium text-faint">скоро</span>}
     </a>
   )
 }
 
-function Sidebar({ path, onNavigate, onSearch }: { path: string; onNavigate: () => void; onSearch: () => void }) {
+function Sidebar({
+  path,
+  onNavigate,
+  onSearch,
+}: {
+  path: string
+  onNavigate: () => void
+  onSearch: () => void
+}) {
   const [theme, toggleTheme] = useTheme()
   const current = activeNav(path)
   const { data: overview } = useOverview()
@@ -101,13 +108,20 @@ function Sidebar({ path, onNavigate, onSearch }: { path: string; onNavigate: () 
         >
           <div className="text-xs text-muted">Бюджет ИИ сегодня</div>
           <div className="num mt-0.5 text-sm font-medium text-ink">
-            {usd(budget?.spentUsd ?? 0)} <span className="font-normal text-muted">из {usd(budget?.capUsd ?? 0)}</span>
+            {usd(budget?.spentUsd ?? 0)}{' '}
+            <span className="font-normal text-muted">из {usd(budget?.capUsd ?? 0)}</span>
           </div>
           <Meter value={budget?.spentUsd ?? 0} max={budget?.capUsd ?? 1} className="mt-2" />
         </a>
         <div className="flex items-center justify-between px-1.5 text-xs text-faint">
           <span>Данные вымышлены, сброс каждую ночь</span>
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="Код на GitHub" className="hover:text-ink">
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Код на GitHub"
+            className="hover:text-ink"
+          >
             <GithubIcon size={15} />
           </a>
         </div>

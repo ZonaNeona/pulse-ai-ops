@@ -2,15 +2,16 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 
-from pulse import __version__, seed, sync
+from pulse import __version__, bot, seed, sync
 from pulse.api import router
-from pulse.core import db
+from pulse.core import db, visitor
 from pulse.core.config import get_settings
+from pulse.modules import knowledge
 
 KINDS = (
     "user",
@@ -30,21 +31,29 @@ KINDS = (
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await sync.ensure_ready()
+    knowledge.ensure_index()
     worker = asyncio.create_task(sync.loop())
-    from pulse import bot as bot_mod
-
-    bot_task = asyncio.create_task(bot_mod.setup_webhook())
+    hook = asyncio.create_task(bot.setup_webhook())
     try:
         yield
     finally:
         worker.cancel()
-        bot_task.cancel()
+        hook.cancel()
 
 
 app = FastAPI(
     title="Pulse", version=__version__, docs_url="/api/swagger", openapi_url="/api/openapi.json", lifespan=lifespan
 )
 app.include_router(router)
+
+
+@app.middleware("http")
+async def session_cookie(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """A first-time visitor gets a session id; the same request already uses it (see `core.visitor`)."""
+    visitor.assign(request)
+    response = await call_next(request)
+    visitor.ensure_cookie(request, response)
+    return response
 
 
 @app.get("/api/health")

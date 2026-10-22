@@ -14,7 +14,9 @@ export function Stat({ kpi, className }: { kpi: Kpi; className?: string }) {
         <span className="text-sm text-muted">{kpi.label}</span>
         <Delta value={kpi.delta} invert={kpi.invert} />
       </div>
-      <div className={clsx('num mt-1.5 text-xl font-semibold tracking-[-0.02em]', toneText[tone])}>{formatKpi(kpi)}</div>
+      <div className={clsx('num mt-1.5 text-xl font-semibold tracking-[-0.02em]', toneText[tone])}>
+        {formatKpi(kpi)}
+      </div>
       <div className="mt-auto pt-2">
         {kpi.spark.length > 1 && (
           <Sparkline values={kpi.spark} tone={tone === 'neutral' ? 'accent' : tone} height={24} />

@@ -118,7 +118,7 @@ def cards(data: Data) -> list[dict[str, Any]]:
             "status": "success" if s.llm_api_key else "neutral",
             "statusLabel": "Подключён" if s.llm_api_key else "Без ключа",
             "lastSync": "—",
-            "detail": "Агент, извлечение полей из документов, оценка звонков",
+            "detail": "Свободные вопросы копилота, ответы по регламентам, чтение загруженных документов",
             "metrics": [{"label": "Лимит в сутки", "value": f"${s.ai_daily_usd:.2f}".replace(".", ",")}],
         },
         {
@@ -127,9 +127,9 @@ def cards(data: Data) -> list[dict[str, Any]]:
             "kind": "Агенты",
             "mode": "API-сервер, MCP",
             "status": "success" if s.hermes_api_url else "neutral",
-            "statusLabel": "Готов" if s.hermes_api_url else "Резервный цикл",
+            "statusLabel": "Подключён" if s.hermes_api_url else "Не подключён",
             "lastSync": "—",
-            "detail": "Инструменты через MCP, скиллы по модулям, подагенты",
+            "detail": "Инструменты через MCP, скиллы, подагенты. Без него — встроенный цикл на тех же инструментах",
             "metrics": [],
         },
     ]

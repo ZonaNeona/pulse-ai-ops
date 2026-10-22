@@ -1,20 +1,8 @@
-"""Knowledge & RAG module for «Норд Инжиниринг»."""
+"""Knowledge base: company regulations, retrieval with sources, honest refusals, measured quality."""
 
-from pulse.modules.knowledge.eval import run_eval
-from pulse.modules.knowledge.model import KbAnswer, KbDocInfo, KbSource, KbStats
-from pulse.modules.knowledge.rag import answer_question
-from pulse.modules.knowledge.search import search_chunks
-from pulse.modules.knowledge.store import ensure_seeded, get_documents, get_stats
+from pulse.modules.knowledge import eval as evaluation
+from pulse.modules.knowledge.answer import Answer, answer
+from pulse.modules.knowledge.index import documents, ensure_index
+from pulse.modules.knowledge.search import search
 
-__all__ = [
-    "KbAnswer",
-    "KbDocInfo",
-    "KbSource",
-    "KbStats",
-    "answer_question",
-    "ensure_seeded",
-    "get_documents",
-    "get_stats",
-    "run_eval",
-    "search_chunks",
-]
+__all__ = ["Answer", "answer", "documents", "ensure_index", "evaluation", "search"]

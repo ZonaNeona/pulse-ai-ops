@@ -5,7 +5,13 @@ import { rubShort } from '@/ui/format'
 import { Badge, Button, Card, CardHeader, Dot, PageHeader, Skeleton } from '@/ui/kit'
 import { useToast } from '@/ui/Toast'
 
-const ICON: Record<string, LucideIcon> = { b24: Database, erp: Database, tg: MessageCircle, llm: Sparkles, hermes: Bot }
+const ICON: Record<string, LucideIcon> = {
+  b24: Database,
+  erp: Database,
+  tg: MessageCircle,
+  llm: Sparkles,
+  hermes: Bot,
+}
 
 export function Integrations() {
   const { data: items } = useIntegrations()
@@ -66,7 +72,11 @@ export function Integrations() {
                 title={`Сверка CRM ↔ 1С · ${recon.period}`}
                 hint="Оплаченные сделки против проведённых реализаций"
                 action={
-                  <Button size="sm" variant="secondary" onClick={() => toast('Задачи ответственным созданы черновиками', 'success')}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => toast('Задачи ответственным созданы черновиками', 'success')}
+                  >
                     Задачи ответственным
                   </Button>
                 }

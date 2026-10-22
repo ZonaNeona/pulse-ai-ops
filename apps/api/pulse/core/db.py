@@ -72,64 +72,12 @@ CREATE TABLE IF NOT EXISTS ai_drafts (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai_drafts_session ON ai_drafts(session_id);
-CREATE TABLE IF NOT EXISTS docs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    kind_label TEXT NOT NULL,
-    number TEXT NOT NULL,
-    date TEXT NOT NULL,
-    counterparty TEXT NOT NULL,
-    amount REAL NOT NULL,
-    status TEXT NOT NULL,
-    confidence REAL NOT NULL,
-    received_ago TEXT NOT NULL,
-    steps_json TEXT NOT NULL,
-    fields_json TEXT NOT NULL,
-    checks_json TEXT NOT NULL,
-    raw_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS docs_session ON docs(session_id);
-
-CREATE TABLE IF NOT EXISTS kb_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    chunk_count INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS kb_chunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    doc_id INTEGER NOT NULL,
-    doc_title TEXT NOT NULL,
-    section TEXT NOT NULL,
-    text TEXT NOT NULL,
-    keywords TEXT NOT NULL,
-    FOREIGN KEY (doc_id) REFERENCES kb_documents(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS kb_chunks_doc ON kb_chunks(doc_id);
-CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunks_fts USING fts5(
-    chunk_id UNINDEXED,
-    doc_title,
-    section,
-    text,
-    tokenize='unicode61'
-);
-CREATE TABLE IF NOT EXISTS kb_eval_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    case_id INTEGER NOT NULL,
-    question TEXT NOT NULL,
-    passed INTEGER NOT NULL,
-    is_refusal INTEGER NOT NULL,
-    answer TEXT NOT NULL,
-    latency_ms INTEGER NOT NULL,
-    note TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-
+-- tables of an earlier prototype, replaced by doc_items and kb_chunk/kb_fts
+DROP TABLE IF EXISTS docs;
+DROP TABLE IF EXISTS kb_chunks_fts;
+DROP TABLE IF EXISTS kb_chunks;
+DROP TABLE IF EXISTS kb_documents;
+DROP TABLE IF EXISTS kb_eval_results;
 """
 
 

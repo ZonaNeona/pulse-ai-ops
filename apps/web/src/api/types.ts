@@ -151,7 +151,7 @@ export interface CallReview {
   waveform: number[]
 }
 
-export type DocStatus = 'recognized' | 'mismatch' | 'review' | 'posted'
+export type DocStatus = 'processing' | 'posted' | 'review' | 'mismatch' | 'rejected' | 'failed'
 export type StepStatus = 'done' | 'active' | 'waiting' | 'error' | 'skipped'
 
 export interface GraphStep {
@@ -170,9 +170,17 @@ export interface DocField {
   expected?: string
 }
 
+export interface DocCheck {
+  label: string
+  ok: boolean
+  detail: string
+  /** The regulation section the check enforces, e.g. «Работа с первичными документами поставщиков, § 1.2». */
+  rule: string
+}
+
 export interface DocItem {
   id: number
-  kind: 'invoice' | 'contract' | 'upd' | 'act'
+  kind: 'invoice' | 'contract' | 'upd' | 'act' | 'unknown'
   kindLabel: string
   number: string
   date: string
@@ -181,9 +189,15 @@ export interface DocItem {
   status: DocStatus
   confidence: number
   receivedAgo: string
+  source: 'demo' | 'upload'
+  engine: 'rules' | 'model'
+  model: string
+  costUsd: number
+  decision: string
+  text: string
   steps: GraphStep[]
   fields: DocField[]
-  checks: { label: string; ok: boolean; detail: string }[]
+  checks: DocCheck[]
 }
 
 export interface KbSource {
@@ -196,8 +210,13 @@ export interface KbSource {
 export interface KbAnswer {
   question: string
   answer: string
-  sources: KbSource[]
+  /** model — written by the model from the sections, extract — quoted sentences, refusal — not in the regulations. */
+  mode: 'model' | 'extract' | 'refusal'
   grounded: boolean
+  sources: KbSource[]
+  model: string
+  costUsd: number
+  note: string
 }
 
 export interface KbStats {
@@ -208,6 +227,13 @@ export interface KbStats {
   evalTotal: number
   refusalsCorrect: number
   refusalsTotal: number
+}
+
+export interface KbDocument {
+  id: string
+  title: string
+  category: string
+  chunks: number
 }
 
 export interface Integration {
@@ -239,9 +265,11 @@ export interface Reconciliation {
   gaps: { deal: string; dealId?: number; client: string; amount: number; issue: string; manager: string }[]
 }
 
+export type Engine = 'rules' | 'kb' | 'model' | 'hermes' | 'none'
+
 export interface TraceStep {
   id: string
-  kind: 'llm' | 'tool' | 'subagent' | 'graph'
+  kind: 'route' | 'llm' | 'tool' | 'subagent' | 'graph'
   name: string
   label: string
   lane: string
@@ -254,7 +282,8 @@ export interface TraceStep {
 export interface TraceRun {
   id: string
   question: string
-  engine: 'hermes' | 'fallback'
+  engine: Engine
+  engineLabel: string
   model: string
   startedAgo: string
   totalMs: number
@@ -265,12 +294,11 @@ export interface TraceRun {
 
 export interface ChatDraft {
   draft_id: string
-  status: 'pending_confirmation' | 'confirmed' | 'undone'
-  action: string
+  status: 'pending' | 'confirmed' | 'discarded'
   title: string
   responsible: string
-  deadline?: string
-  note?: string
+  deadline: string
+  dealId?: number | null
 }
 
 export interface ChatMessage {
@@ -278,9 +306,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   text: string
   sources?: { label: string; href: string }[]
+  engine?: Engine
   trace?: TraceRun
-  cached?: boolean
-  draft?: ChatDraft
+  drafts?: ChatDraft[]
 }
 
 export interface Budget {
@@ -291,4 +319,5 @@ export interface Budget {
   documentsLeft: number
   documentsCap: number
   byHour: number[]
+  modelConnected: boolean
 }

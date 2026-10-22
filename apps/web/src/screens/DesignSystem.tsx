@@ -73,7 +73,10 @@ export function DesignSystem() {
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
             {COLORS.map(([token, label]) => (
               <div key={token}>
-                <div className="h-12 rounded-md border border-line" style={{ background: `var(--${token})` }} />
+                <div
+                  className="h-12 rounded-md border border-line"
+                  style={{ background: `var(--${token})` }}
+                />
                 <div className="mt-1.5 text-xs text-ink">{label}</div>
                 <div className="mono text-[11px] text-muted">--{token}</div>
               </div>
@@ -87,7 +90,10 @@ export function DesignSystem() {
                 <span className="mono w-16 shrink-0 text-xs text-muted">
                   {name} · {px}
                 </span>
-                <span className="min-w-0 truncate font-semibold tracking-[-0.02em] text-ink" style={{ fontSize: px, lineHeight: 1.2 }}>
+                <span
+                  className="min-w-0 truncate font-semibold tracking-[-0.02em] text-ink"
+                  style={{ fontSize: px, lineHeight: 1.2 }}
+                >
                   {sample}
                 </span>
               </div>
@@ -150,7 +156,7 @@ export function DesignSystem() {
           <div className="mt-4 flex flex-col gap-2">
             <Notice tone="info">Данные обновляются раз в 5 минут.</Notice>
             <Notice tone="warning" icon={<Sparkles size={15} />}>
-              Ответ собран из кэша: дневной лимит модели исчерпан.
+              Дневной бюджет модели исчерпан: до завтра работают готовые ответы.
             </Notice>
           </div>
         </Section>
@@ -176,7 +182,11 @@ export function DesignSystem() {
               <Skeleton className="h-4 w-1/2" />
               <Skeleton className="h-20" />
             </div>
-            <Empty icon={<Inbox size={18} />} title="Пока пусто" text="Здесь появятся документы, когда придут на почту" />
+            <Empty
+              icon={<Inbox size={18} />}
+              title="Пока пусто"
+              text="Здесь появятся документы, когда придут на почту"
+            />
           </div>
         </Section>
       </div>

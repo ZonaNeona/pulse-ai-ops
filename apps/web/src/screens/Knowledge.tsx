@@ -1,33 +1,29 @@
-import { Fragment, useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
 import { ArrowUp, BookOpen, FileText, Loader2, ShieldCheck, Sparkles } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { KbAnswer } from '@/api/types'
-import { askKb, useKbAnswer, useKbStats } from '@/api/queries'
-import { Badge, Card, CardHeader, Notice, PageHeader, Skeleton } from '@/ui/kit'
+import { askKb, useKbDocuments, useKbStats } from '@/api/queries'
+import { useRoute } from '@/app/router'
+import { count, usd } from '@/ui/format'
+import { Badge, Card, CardHeader, Empty, PageHeader, Skeleton, type Tone } from '@/ui/kit'
 import { useToast } from '@/ui/Toast'
 
-const DOCS = [
-  ['Ценовая политика 2026', 14],
-  ['Регламент согласования сделок', 9],
-  ['Гарантийные обязательства', 11],
-  ['Стандарт монтажа ВК и ОВ', 42],
-  ['Работа с рекламациями', 8],
-  ['Скрипты первого звонка', 6],
-  ['Складской регламент отпуска ТМЦ', 12],
-  ['Положение о командировках инженеров', 10],
-  ['Регламент шеф-монтажных работ', 15],
-  ['Положение об абонентском сервисе', 16],
-] as const
-
 const PRESETS = [
-  { label: 'Скидка дилеру', query: 'Какая скидка допустима для дилера без согласования с директором?' },
-  { label: 'Гарантия на монтаж', query: 'Какой срок гарантии на монтажные работы?' },
-  { label: 'Опрессовка отопления', query: 'Какое давление используется при опрессовке систем отопления?' },
-  { label: 'Выезд по рекламации', query: 'В течение какого времени инженер выезжает на объект по рекламации?' },
-  { label: 'Марка кофе (ловушка)', query: 'Какая марка кофе закупается на кухню офиса?' },
+  { label: 'Скидка дилеру', query: 'Какую скидку менеджер может дать дилеру без согласования?' },
+  { label: 'Гарантия на монтаж', query: 'Какая гарантия на монтажные работы?' },
+  { label: 'Опрессовка', query: 'Каким давлением делают опрессовку отопления?' },
+  { label: 'Выезд по аварии', query: 'Как быстро инженер выезжает в клинику по аварии?' },
+  { label: 'Вне базы', query: 'Какой кофе закупают на кухню офиса?' },
 ]
 
-/** Renders «текст [1] текст» with superscript clickable source markers. */
+const MODE: Record<KbAnswer['mode'], { label: string; tone: Tone }> = {
+  model: { label: 'Ответ модели по найденным разделам, ссылки проверены кодом', tone: 'success' },
+  extract: { label: 'Выдержки из регламентов, без модели', tone: 'info' },
+  refusal: { label: 'В регламентах ответа нет', tone: 'warning' },
+}
+
+/** Renders «текст [1] текст» with clickable source markers. */
 function withCitations(text: string, onCite: (n: number) => void): ReactNode[] {
   return text.split(/(\[\d+\])/).map((part, i) => {
     const m = /^\[(\d+)\]$/.exec(part)
@@ -38,7 +34,7 @@ function withCitations(text: string, onCite: (n: number) => void): ReactNode[] {
         key={i}
         onClick={() => onCite(n)}
         aria-label={`Источник ${n}`}
-        className="mx-0.5 inline-grid h-[18px] min-w-[18px] place-items-center rounded-sm border border-accent/30 bg-accent-soft px-1 align-[2px] text-[11px] leading-none font-semibold text-accent hover:bg-accent hover:text-accent-fg"
+        className="mx-0.5 inline-grid h-[18px] min-w-[18px] cursor-pointer place-items-center rounded-sm border border-accent/30 bg-accent-soft px-1 align-[2px] text-[11px] leading-none font-semibold text-accent hover:bg-accent hover:text-accent-fg"
       >
         {n}
       </button>
@@ -48,85 +44,73 @@ function withCitations(text: string, onCite: (n: number) => void): ReactNode[] {
 
 export function Knowledge() {
   const { data: stats } = useKbStats()
-  const { data: defaultAnswer } = useKbAnswer()
+  const { data: docs } = useKbDocuments()
+  const { query } = useRoute()
   const [active, setActive] = useState<number | null>(1)
-  const [question, setQuestion] = useState('')
-  const [customAnswer, setCustomAnswer] = useState<KbAnswer | null>(null)
+  const [question, setQuestion] = useState(query.get('q') ?? '')
+  const [answer, setAnswer] = useState<KbAnswer | null>(null)
   const [loading, setLoading] = useState(false)
+  const asked = useRef(false)
   const toast = useToast()
+  const qc = useQueryClient()
 
-  const answer = customAnswer ?? defaultAnswer
-
-  const handleAsk = async (text: string) => {
+  const ask = async (text: string) => {
     const q = text.trim()
-    if (!q) return
+    if (!q || loading) return
     setLoading(true)
     try {
       const resp = await askKb(q)
-      setCustomAnswer(resp)
+      setAnswer(resp)
       setActive(resp.sources.length > 0 ? 1 : null)
-      if (!resp.grounded) {
-        toast('Вопрос вне регламентов компании — сформирован честный отказ', 'neutral')
-      }
+      qc.invalidateQueries({ queryKey: ['budget'] })
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Ошибка поиска по базе знаний'
-      toast(msg, 'danger')
+      toast(err instanceof Error ? err.message : 'Не удалось получить ответ', 'danger')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault()
-    handleAsk(question)
-  }
+  // A link from the copilot (?q=…) carries a question the visitor already asked: answer it once.
+  useEffect(() => {
+    const q = query.get('q')
+    if (q && !asked.current) {
+      asked.current = true
+      void ask(q)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const handlePreset = (queryText: string) => {
-    setQuestion(queryText)
-    handleAsk(queryText)
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void ask(question)
   }
 
   return (
     <>
       <PageHeader
         eyebrow="Модуль · Знания"
-        title="База знаний компании"
-        description="Ответы только по регламентам: каждое утверждение со ссылкой на фрагмент. Нет источника — ассистент честно говорит «не знаю»."
+        title="Регламенты компании"
+        description="Ответ собирается только из найденных разделов, у каждого утверждения есть ссылка на источник. Если в регламентах ответа нет, ассистент так и говорит."
       />
-      <Notice tone="neutral" className="mb-4">
-        <div className="flex w-full flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="flex size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-semibold text-ink">RAG-конвейер активен:</span>
-            <span className="text-muted">
-              FTS5 полнотекстовый индекс + BM25, цитирование фрагментов, защита от галлюцинаций
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
-            <span>Faithfulness eval: 19/20</span>
-            <span>•</span>
-            <span>Отказы 5/5</span>
-          </div>
-        </div>
-      </Notice>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-4">
           <div className="flex flex-col gap-2">
             <form
-              onSubmit={handleSubmit}
+              onSubmit={submit}
               className="flex items-center gap-2 rounded-lg border border-line bg-surface p-1.5 pl-4 shadow-card focus-within:border-accent"
             >
               <input
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Например: какой срок гарантии на монтаж?"
-                className="h-9 flex-1 bg-transparent text-base outline-none placeholder:text-faint"
+                maxLength={500}
+                placeholder="Например: какая гарантия на монтаж?"
+                className="h-9 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-faint"
               />
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !question.trim()}
                 aria-label="Спросить"
-                className="grid size-9 place-items-center rounded-md bg-accent text-accent-fg disabled:opacity-50"
+                className="grid size-9 cursor-pointer place-items-center rounded-md bg-accent text-accent-fg disabled:opacity-50"
               >
                 {loading ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} />}
               </button>
@@ -140,8 +124,11 @@ export function Knowledge() {
                 <button
                   key={p.label}
                   type="button"
-                  onClick={() => handlePreset(p.query)}
-                  className="rounded-full border border-line bg-surface px-2.5 py-0.5 text-ink hover:border-accent hover:text-accent transition-colors"
+                  onClick={() => {
+                    setQuestion(p.query)
+                    void ask(p.query)
+                  }}
+                  className="cursor-pointer rounded-full border border-line bg-surface px-2.5 py-0.5 text-ink transition-colors hover:border-accent hover:text-accent"
                 >
                   {p.label}
                 </button>
@@ -149,24 +136,30 @@ export function Knowledge() {
             </div>
           </div>
 
-          {!answer ? (
-            <Skeleton className="h-64" />
-          ) : (
+          {loading && !answer ? (
+            <Skeleton className="h-56" />
+          ) : !answer ? (
             <Card>
+              <Empty
+                title="Задайте вопрос по регламентам"
+                text="Поиск идёт по 10 документам компании: цены и скидки, договоры, гарантия, рекламации, монтаж, склад, продажи, первичка, сервис, командировки."
+              />
+            </Card>
+          ) : (
+            <Card className={clsx(loading && 'opacity-60')}>
               <div className="text-sm font-medium text-muted">{answer.question}</div>
               <p className="mt-2 text-md leading-7 text-ink">{withCitations(answer.answer, setActive)}</p>
-              <div className="mt-3 flex items-center gap-2">
-                {answer.grounded ? (
-                  <Badge tone="success" dot>
-                    Опирается на {answer.sources.length}{' '}
-                    {answer.sources.length === 1 ? 'источник' : answer.sources.length < 5 ? 'источника' : 'источников'}
-                  </Badge>
-                ) : (
-                  <Badge tone="warning" dot>
-                    Честный отказ: вне регламентов компании
-                  </Badge>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Badge tone={MODE[answer.mode].tone} dot>
+                  {MODE[answer.mode].label}
+                </Badge>
+                {answer.mode === 'model' && (
+                  <span className="text-xs text-muted">
+                    {answer.model.split('/').pop()} · {usd(answer.costUsd)}
+                  </span>
                 )}
               </div>
+              {answer.note && <p className="mt-2 text-xs text-muted">{answer.note}</p>}
               {answer.sources.length > 0 && (
                 <ul className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
                   {answer.sources.map((s) => (
@@ -174,11 +167,13 @@ export function Knowledge() {
                       <button
                         onClick={() => setActive(s.id)}
                         className={clsx(
-                          'w-full rounded-md border px-3 py-2.5 text-left transition-colors',
-                          active === s.id ? 'border-accent bg-accent-soft/40' : 'border-line hover:border-line-strong',
+                          'w-full cursor-pointer rounded-md border px-3 py-2.5 text-left transition-colors',
+                          active === s.id
+                            ? 'border-accent bg-accent-soft/40'
+                            : 'border-line hover:border-line-strong',
                         )}
                       >
-                        <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                        <div className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-ink">
                           <span className="grid size-4 place-items-center rounded-sm bg-accent-soft text-[10px] font-semibold text-accent">
                             {s.id}
                           </span>
@@ -201,15 +196,15 @@ export function Knowledge() {
           ) : (
             <Card>
               <CardHeader
-                title="Качество ответов"
-                hint="Прогон eval на эталонных вопросах"
+                title="Проверка качества"
+                hint="Эталонные вопросы прогоняются без модели: найден ли нужный раздел и есть ли отказ вне базы"
                 icon={<ShieldCheck size={16} />}
               />
               <dl className="grid grid-cols-2 gap-3">
-                <Metric label="С источником" value={`${stats.grounded}%`} />
-                <Metric label="Эталоны" value={`${stats.evalPassed} / ${stats.evalTotal}`} />
-                <Metric label="Честное «не знаю»" value={`${stats.refusalsCorrect} / ${stats.refusalsTotal}`} />
-                <Metric label="Фрагментов" value={String(stats.chunks)} />
+                <Metric label="Нужный раздел найден" value={`${stats.evalPassed} / ${stats.evalTotal}`} />
+                <Metric label="Отказ вне базы" value={`${stats.refusalsCorrect} / ${stats.refusalsTotal}`} />
+                <Metric label="Документов" value={String(stats.documents)} />
+                <Metric label="Разделов" value={String(stats.chunks)} />
               </dl>
             </Card>
           )}
@@ -217,19 +212,27 @@ export function Knowledge() {
             <div className="px-4 pt-4">
               <CardHeader
                 title="Документы в базе"
-                hint={`${stats?.documents ?? '24'} регламента, FTS5 + цитаты`}
+                hint="Индекс SQLite FTS5 по основам слов, ранжирование BM25"
                 icon={<BookOpen size={16} />}
               />
             </div>
-            <ul className="divide-y divide-line border-t border-line">
-              {DOCS.map(([title, chunks]) => (
-                <li key={title} className="flex items-center gap-2.5 px-4 py-2.5 text-sm">
-                  <FileText size={14} className="text-faint" />
-                  <span className="flex-1 truncate text-ink-2">{title}</span>
-                  <span className="num text-xs text-muted">{chunks}</span>
-                </li>
-              ))}
-            </ul>
+            {!docs ? (
+              <div className="p-4">
+                <Skeleton className="h-40" />
+              </div>
+            ) : (
+              <ul className="divide-y divide-line border-t border-line">
+                {docs.map((d) => (
+                  <li key={d.id} className="flex items-center gap-2.5 px-4 py-2.5 text-sm">
+                    <FileText size={14} className="shrink-0 text-faint" />
+                    <span className="flex-1 truncate text-ink-2">{d.title}</span>
+                    <span className="num text-xs text-muted">
+                      {count(d.chunks, ['раздел', 'раздела', 'разделов'])}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
       </div>

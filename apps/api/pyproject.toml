@@ -17,6 +17,7 @@ dependencies = [
     "mcp>=1.2",
     "reportlab>=4.2",
     "pypdf>=5.1",
+    "snowballstemmer>=2.2",
     "tzdata>=2024.2",
 ]
 

@@ -1,32 +1,46 @@
-"""HTTP routes for the screens. Every handler is a thin call into a module working on the data snapshot."""
+"""HTTP routes for the screens. Every handler is a thin call into a module.
 
-import json
-from typing import Any, cast
+Who is asking is decided by the server (`core.visitor`): the session cookie separates visitors' documents,
+drafts and chat, the IP hash carries the AI limits. Nothing is taken from client-sent ids.
+"""
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from typing import Annotated, Any
 
-from pulse import bot as bot_mod
-from pulse import data
-from pulse.agents import cache, runner, tools
-from pulse.core import budget, config, db
-from pulse.modules import docs as docs_mod
-from pulse.modules import integrations, overview
-from pulse.modules import knowledge as kb_mod
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
+from pydantic import BaseModel, Field
+
+from pulse import bot, data
+from pulse.agents import hermes, runner, tools
+from pulse.agents import trace as traces
+from pulse.core import budget, llm, visitor
+from pulse.core.config import get_settings
+from pulse.core.visitor import Visitor
+from pulse.modules import docs, integrations, knowledge, overview
+from pulse.modules.docs import read
 from pulse.modules.sales import calls, deals, pulse, signals, team
 
 router = APIRouter(prefix="/api")
+Who = Annotated[Visitor, Depends(visitor.identify)]
 
 
-class ChatRequest(BaseModel):
-    message: str
-    session_id: str = ""
-    visitor_id: str = ""
+class Question(BaseModel):
+    message: str = Field(min_length=1, max_length=800)
+
+
+class KbQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+
+
+# --- Overview and sales -------------------------------------------------------
 
 
 @router.get("/overview")
-def get_overview() -> dict[str, Any]:
-    return overview.overview(data.load())
+async def get_overview(who: Who) -> dict[str, Any]:
+    await docs.queue(who.session)
+    cards = overview.ai_cards(
+        docs.pending(who.session), knowledge.evaluation.stats(), budget.summary(who.quota), traces.count_today()
+    )
+    return overview.overview(data.load(), cards)
 
 
 @router.get("/sales/pulse")
@@ -63,46 +77,7 @@ def get_call(call_id: int) -> dict[str, Any]:
     return review
 
 
-@router.get("/budget")
-def get_budget(request: Request) -> dict[str, Any]:
-    """AI spend today and the per-visitor limits calculated from SQLite."""
-    visitor_id = request.headers.get("x-visitor-id", "") or (request.client.host if request.client else "")
-    return budget.summary(visitor_id)
-
-
-@router.post("/copilot/chat")
-async def copilot_chat(body: ChatRequest, request: Request) -> dict[str, Any]:
-    """Answers a question via instant cache, Hermes Agent (if running), or the fallback runner."""
-    hdr_v = request.headers.get("x-visitor-id", "")
-    ip_v = request.client.host if request.client else ""
-    visitor = body.visitor_id or hdr_v or ip_v
-    return await runner.answer(body.message, body.session_id, visitor)
-
-
-
-@router.get("/trace/latest")
-def get_latest_trace() -> dict[str, Any]:
-    """Latest agent trace for the 'Under the Hood' screen."""
-    tr = runner.get_latest_trace()
-    if tr is not None:
-        return tr
-    d = data.load()
-    sample = cache.find_answer("Сравни продажи октября с оплатами в 1С", d)
-    return cache.build_trace("Сравни продажи октября с оплатами в 1С", sample or {})
-
-
-@router.post("/drafts/{draft_id}/confirm")
-def confirm_draft(draft_id: str) -> dict[str, Any]:
-    """Confirm a draft action (Human-in-the-loop)."""
-    return cast(dict[str, Any], tools.run_tool("confirm_draft", {"draft_id": draft_id}))
-
-
-@router.post("/drafts/{draft_id}/undo")
-def undo_draft(draft_id: str) -> dict[str, Any]:
-    """Undo or cancel a draft action."""
-    return cast(dict[str, Any], tools.run_tool("undo_draft", {"draft_id": draft_id}))
-
-
+# --- Integrations -------------------------------------------------------------
 
 
 @router.get("/integrations")
@@ -120,227 +95,145 @@ def get_reconciliation() -> dict[str, Any]:
     return integrations.reconciliation(data.load())
 
 
-# --- Documents Module (LangGraph) -------------------------------------------
+# --- Documents (LangGraph) ----------------------------------------------------
 
 
 @router.get("/docs")
-def get_docs(request: Request) -> list[dict[str, Any]]:
-    """List of incoming documents with their LangGraph processing status."""
-    visitor = request.headers.get("x-visitor-id", "default")
-    items = docs_mod.list_docs(visitor)
-    return [item.to_dict() for item in items]
+async def get_docs(who: Who) -> list[dict[str, Any]]:
+    return await docs.queue(who.session)
 
 
-@router.get("/docs/graph/schema")
-def get_docs_graph_schema() -> dict[str, str]:
-    """Mermaid diagram of the LangGraph document state machine."""
-    return {"mermaid": docs_mod.get_mermaid_schema()}
+@router.get("/docs/graph")
+def get_docs_graph() -> dict[str, str]:
+    """The graph as LangGraph itself draws it (mermaid), not a hand-made picture."""
+    return {"mermaid": docs.graph.mermaid()}
 
 
 @router.get("/docs/{doc_id}")
-def get_doc_detail(doc_id: int, request: Request) -> dict[str, Any]:
-    """Details of a specific document, its LangGraph steps, fields and checks."""
-    visitor = request.headers.get("x-visitor-id", "default")
-    doc = docs_mod.get_doc(doc_id, visitor)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Документ #{doc_id} не найден")
+async def get_doc(doc_id: int, who: Who) -> dict[str, Any]:
+    doc = await docs.get(who.session, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
     return doc.to_dict()
 
 
-@router.post("/docs/{doc_id}/confirm")
-def confirm_document(doc_id: int, request: Request) -> dict[str, Any]:
-    """Human-in-the-loop: confirms document and advances LangGraph to 'posted'."""
-    visitor = request.headers.get("x-visitor-id", "default")
+async def _decide(doc_id: int, who: Visitor, approve: bool) -> dict[str, Any]:
     try:
-        updated = docs_mod.confirm_doc(doc_id, visitor)
-        return updated.to_dict()
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        return (await docs.decide(who.session, doc_id, approve)).to_dict()
+    except docs.NotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.post("/docs/{doc_id}/approve")
+async def approve_doc(doc_id: int, who: Who) -> dict[str, Any]:
+    return await _decide(doc_id, who, True)
 
 
 @router.post("/docs/{doc_id}/reject")
-def reject_document(doc_id: int, request: Request) -> dict[str, Any]:
-    """Human-in-the-loop: requests correction from the supplier."""
-    visitor = request.headers.get("x-visitor-id", "default")
-    try:
-        updated = docs_mod.reject_doc(doc_id, visitor)
-        return updated.to_dict()
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+async def reject_doc(doc_id: int, who: Who) -> dict[str, Any]:
+    return await _decide(doc_id, who, False)
 
 
 @router.post("/docs/upload")
-async def upload_document(
-    request: Request,
-    file: UploadFile | None = None,
-) -> dict[str, Any]:
-    """Uploads a new document (PDF, PNG, JPG, TXT) and runs it through the LangGraph pipeline."""
-    hdr_v = request.headers.get("x-visitor-id", "")
-    ip_v = request.client.host if request.client else ""
-    visitor = hdr_v or ip_v or "default"
-
-    # 1. Budget quota check: 3 documents/day limit
-    allowed, reason = budget.can_spend(visitor, action="document")
-    if not allowed:
-        raise HTTPException(status_code=429, detail=reason)
-
-    res_id = budget.reserve(visitor, action="document", estimated_usd=0.01)
-
+async def upload_doc(file: UploadFile, who: Who) -> dict[str, Any]:
+    content = await file.read(read.MAX_BYTES + 1)
     try:
-        raw_text = ""
-        filename = "document.pdf"
-        if file is not None:
-            filename = file.filename or "document.pdf"
-            content = await file.read()
-            try:
-                raw_text = content.decode("utf-8")
-            except UnicodeDecodeError:
-                raw_text = (
-                    f"Счёт на оплату № {filename} от 22.10.2026. "
-                    "Поставщик: ООО «ТехСнабМонтаж», ИНН 7812998811. "
-                    "Сумма: 385 000,00 руб. НДС 20%: 64 166,67 руб. "
-                    "Основание: Договор № 44-М."
-                )
-        else:
-            raw_text = (
-                "Счёт на оплату № 512 от 22.10.2026. "
-                "Поставщик: ООО «КлиматСервис», ИНН 7805123456. "
-                "Сумма: 195 000,00 руб. НДС 20%: 32 500,00 руб. "
-                "Основание: Заказ поставщику."
-            )
-
-        # 2. Extract parsed fields
-        parsed = docs_mod.extract.parse_raw_document(raw_text)
-
-        # 3. Create document in SQLite
-        new_doc = docs_mod.create_doc(
-            session_id=visitor,
-            kind=parsed["kind"],
-            kind_label=parsed["kindLabel"],
-            number=parsed["number"],
-            date=parsed["date"],
-            counterparty=parsed["counterparty"],
-            amount=parsed["amount"],
-            status="recognized",
-            confidence=parsed["confidence"],
-            steps=[],
-            fields=[f.to_dict() for f in parsed["fields"]],
-            checks=[],
-            raw_text=raw_text,
-        )
-
-        # 4. Run through LangGraph StateGraph
-        initial_state = {
-            "kind": new_doc.kind,
-            "kind_label": new_doc.kind_label,
-            "number": new_doc.number,
-            "date": new_doc.date,
-            "counterparty": new_doc.counterparty,
-            "amount": new_doc.amount,
-            "confidence": new_doc.confidence,
-            "fields": [f.to_dict() for f in new_doc.fields],
-            "raw_text": raw_text,
-        }
-        res_graph = docs_mod.graph.run_pipeline(new_doc.id, initial_state)
-
-        # 5. Update document with LangGraph results
-        updated_steps = res_graph.get("steps", [])
-        updated_checks = res_graph.get("checks", [])
-        updated_fields = res_graph.get("fields", [f.to_dict() for f in new_doc.fields])
-        updated_status = res_graph.get("status", "recognized")
-
-        with db.connect() as conn:
-            conn.execute(
-                "UPDATE docs SET status = ?, steps_json = ?, checks_json = ?, fields_json = ? WHERE id = ?",
-                (
-                    updated_status,
-                    json.dumps(updated_steps, ensure_ascii=False),
-                    json.dumps(updated_checks, ensure_ascii=False),
-                    json.dumps(updated_fields, ensure_ascii=False),
-                    new_doc.id,
-                ),
-            )
-
-        budget.settle(res_id, actual_usd=0.005)
-
-        saved = docs_mod.get_doc(new_doc.id, visitor)
-        assert saved is not None
-        return saved.to_dict()
-
-    except Exception as e:
-        budget.settle(res_id, actual_usd=0.0)
-        raise HTTPException(status_code=500, detail=f"Ошибка обработки документа: {e}") from e
+        doc = await docs.upload(who.session, who.quota, file.filename or "document", content)
+    except read.Unreadable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return doc.to_dict()
 
 
-# --- Knowledge Module (RAG & Eval) -------------------------------------------
-
-
-class AskKbRequest(BaseModel):
-    question: str
+# --- Knowledge ----------------------------------------------------------------
 
 
 @router.get("/kb/stats")
 def get_kb_stats() -> dict[str, Any]:
-    """Overall knowledge base quality metrics, chunk count and eval benchmark results."""
-    return kb_mod.get_stats().to_dict()
-
-
-@router.get("/kb/answer")
-def get_kb_answer(
-    q: str = "Какая скидка допустима для дилера без согласования с директором?",
-) -> dict[str, Any]:
-    """Answers a question grounded in company regulations with citations [1], [2]."""
-    return kb_mod.answer_question(q).to_dict()
-
-
-@router.post("/kb/ask")
-def post_kb_ask(req: AskKbRequest) -> dict[str, Any]:
-    """Answers a question grounded in company regulations with citations [1], [2]."""
-    return kb_mod.answer_question(req.question).to_dict()
+    return knowledge.evaluation.stats()
 
 
 @router.get("/kb/documents")
 def get_kb_documents() -> list[dict[str, Any]]:
-    """List of all regulations in the knowledge base with their categories and chunk counts."""
-    return [d.to_dict() for d in kb_mod.get_documents()]
+    return knowledge.documents()
 
 
 @router.get("/kb/eval")
 def get_kb_eval() -> dict[str, Any]:
-    """Runs or returns the golden evaluation benchmark suite for RAG faithfulness and refusals."""
-    return kb_mod.run_eval()
+    """The golden set run without a model: retrieval must find the right section or refuse."""
+    return knowledge.evaluation.latest()
 
 
-# --- Telegram Bot & Mini App -------------------------------------------------
+@router.post("/kb/ask")
+async def ask_kb(body: KbQuestion, who: Who) -> dict[str, Any]:
+    return (await knowledge.answer(body.question, who.quota)).to_dict()
 
 
-class ValidateInitDataRequest(BaseModel):
-    init_data: str
+# --- Copilot, drafts, traces, budget ------------------------------------------
+
+
+@router.post("/copilot/chat")
+async def copilot_chat(body: Question, who: Who) -> dict[str, Any]:
+    return await runner.ask(body.message, who)
+
+
+@router.get("/copilot/drafts")
+def get_drafts(who: Who) -> list[dict[str, Any]]:
+    return [runner.draft_view(d) for d in tools.drafts(who.session)]
+
+
+def _set_draft(draft_id: str, who: Visitor, status: str) -> dict[str, Any]:
+    result = tools.set_draft(draft_id, who.session, status)
+    if result is None:
+        raise HTTPException(status_code=409, detail="Черновик не найден или уже решён")
+    return result
+
+
+@router.post("/drafts/{draft_id}/confirm")
+def confirm_draft(draft_id: str, who: Who) -> dict[str, Any]:
+    """A person confirms the agent's draft. In the demo it is kept for this visitor only, nothing leaves the stand."""
+    return _set_draft(draft_id, who, "confirmed")
+
+
+@router.post("/drafts/{draft_id}/discard")
+def discard_draft(draft_id: str, who: Who) -> dict[str, Any]:
+    return _set_draft(draft_id, who, "discarded")
+
+
+@router.get("/agents")
+def get_agents() -> dict[str, Any]:
+    """What the agent layer consists of right now — the «Под капотом» screen shows it as is."""
+    s = get_settings()
+    return {
+        "tools": [{"name": t.name, "description": t.description, "writes": t.writes} for t in tools.TOOLS.values()],
+        "model": s.llm_model if llm.available() else "",
+        "visionModel": s.llm_vision_model if llm.available() else "",
+        "hermes": hermes.configured(),
+    }
+
+
+@router.get("/trace/latest")
+def get_latest_trace() -> dict[str, Any] | None:
+    return runner.latest()
+
+
+@router.get("/budget")
+def get_budget(who: Who) -> dict[str, Any]:
+    return budget.summary(who.quota)
+
+
+# --- Telegram -------------------------------------------------------------------
 
 
 @router.get("/bot/status")
 def get_bot_status() -> dict[str, Any]:
-    """Returns Telegram bot readiness, commands and Mini App launch URL."""
-    return bot_mod.get_status()
+    return bot.status()
 
 
 @router.post("/bot/webhook")
-async def post_bot_webhook(request: Request) -> dict[str, Any]:
-    """Receives Telegram webhook updates and dispatches them to aiogram."""
-    try:
-        body = await request.json()
-        await bot_mod.feed_update(body)
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
-
-
-@router.post("/bot/validate_init_data")
-def post_validate_init_data(req: ValidateInitDataRequest) -> dict[str, Any]:
-    """Validates Telegram WebApp initData HMAC-SHA256 signature."""
-    s = config.get_settings()
-    is_valid = bot_mod.validate_init_data(req.init_data, s.telegram_bot_token)
-    return {"valid": is_valid}
-
-
-
+async def bot_webhook(
+    request: Request, secret: Annotated[str, Header(alias="X-Telegram-Bot-Api-Secret-Token")] = ""
+) -> dict[str, bool]:
+    if not bot.check_secret(secret):
+        raise HTTPException(status_code=403, detail="forbidden")
+    await bot.feed(await request.json())
+    return {"ok": True}

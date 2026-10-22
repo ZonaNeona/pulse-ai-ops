@@ -1,10 +1,20 @@
 import clsx from 'clsx'
-import { Activity, ArrowRight, BookOpen, Bot, Cable, Cpu, FileText, Sparkles, type LucideIcon } from 'lucide-react'
+import {
+  Activity,
+  ArrowRight,
+  BookOpen,
+  Bot,
+  Cable,
+  Cpu,
+  FileText,
+  Sparkles,
+  type LucideIcon,
+} from 'lucide-react'
 import { motion } from 'motion/react'
 import type { ActionItem, ModuleId } from '@/api/types'
 import { useLastTrace, useOverview } from '@/api/queries'
 import { navigate, withQuery } from '@/app/router'
-import { PRESETS } from '@/mock/demo'
+import { PRESETS } from '@/app/presets'
 import { Ring } from '@/ui/charts'
 import { ms, rubShort, usd } from '@/ui/format'
 import { Badge, Button, Card, CardHeader, Dot, ErrorState, PageHeader, Skeleton, type Tone } from '@/ui/kit'
@@ -93,7 +103,11 @@ export function Overview() {
                     <span
                       className={clsx(
                         'grid size-8 shrink-0 place-items-center rounded-md',
-                        sev.tone === 'danger' ? 'bg-danger-soft text-danger' : sev.tone === 'warning' ? 'bg-warning-soft text-warning' : 'bg-surface-2 text-muted',
+                        sev.tone === 'danger'
+                          ? 'bg-danger-soft text-danger'
+                          : sev.tone === 'warning'
+                            ? 'bg-warning-soft text-warning'
+                            : 'bg-surface-2 text-muted',
                       )}
                     >
                       <Icon size={15} />
@@ -108,7 +122,9 @@ export function Overview() {
                     <Badge tone={sev.tone} className="hidden sm:inline-flex">
                       {sev.label}
                     </Badge>
-                    <span className="num hidden w-14 text-right text-xs whitespace-nowrap text-faint md:block">{a.age}</span>
+                    <span className="num hidden w-14 text-right text-xs whitespace-nowrap text-faint md:block">
+                      {a.age}
+                    </span>
                     <Button variant="secondary" size="sm" onClick={() => navigate(a.href)}>
                       {a.action}
                     </Button>
@@ -157,7 +173,11 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: Tone
 function AskCard() {
   return (
     <Card>
-      <CardHeader title="Спросите своими словами" hint="Копилот ответит по данным CRM, 1С и регламентам" icon={<Bot size={16} />} />
+      <CardHeader
+        title="Спросите своими словами"
+        hint="Копилот ответит по данным CRM, 1С и регламентам"
+        icon={<Bot size={16} />}
+      />
       <div className="flex flex-col gap-1.5">
         {PRESETS.slice(0, 3).map((p) => (
           <button
@@ -175,17 +195,30 @@ function AskCard() {
 }
 
 function LastRunCard() {
-  const { data } = useLastTrace()
-  if (!data) return <Skeleton className="h-40" />
+  const { data, isLoading } = useLastTrace()
+  if (isLoading) return <Skeleton className="h-40" />
+  if (!data)
+    return (
+      <Card onClick={() => navigate('/copilot')}>
+        <CardHeader
+          title="Ход агента"
+          hint="Появится после первого вопроса в Копилоте"
+          icon={<Cpu size={16} />}
+        />
+        <p className="text-sm text-muted">
+          Под каждым ответом видно, какие инструменты вызывал агент, сколько это заняло и сколько стоило.
+        </p>
+      </Card>
+    )
   const tools = data.steps.filter((s) => s.kind === 'tool').length
-  const agents = data.steps.filter((s) => s.kind === 'subagent').length
+  const total = Math.max(data.totalMs, 1)
   return (
     <Card onClick={() => navigate('/under-the-hood')}>
       <CardHeader
-        title="Ход агента · пример"
-        hint="Живая трассировка — с подключением Hermes Agent"
+        title="Последний ход агента"
+        hint={data.startedAgo}
         icon={<Cpu size={16} />}
-        action={<Badge tone="accent">{data.engine === 'hermes' ? 'Hermes' : 'Резерв'}</Badge>}
+        action={<Badge tone="accent">{data.engineLabel}</Badge>}
       />
       <p className="line-clamp-2 text-sm text-ink-2">«{data.question}»</p>
       <div className="mt-3 flex flex-col gap-1">
@@ -196,9 +229,18 @@ function LastRunCard() {
               <span
                 className={clsx(
                   'absolute inset-y-0 rounded-full',
-                  s.kind === 'tool' ? 'bg-chart-2' : s.kind === 'subagent' ? 'bg-chart-3' : 'bg-accent',
+                  s.kind === 'tool'
+                    ? 'bg-chart-2'
+                    : s.kind === 'subagent'
+                      ? 'bg-chart-3'
+                      : s.kind === 'route'
+                        ? 'bg-faint'
+                        : 'bg-accent',
                 )}
-                style={{ left: `${(s.startMs / data.totalMs) * 100}%`, width: `${Math.max(2, (s.durMs / data.totalMs) * 100)}%` }}
+                style={{
+                  left: `${Math.min(98, (s.startMs / total) * 100)}%`,
+                  width: `${Math.max(2, (s.durMs / total) * 100)}%`,
+                }}
               />
             </div>
           </div>
@@ -206,9 +248,10 @@ function LastRunCard() {
       </div>
       <div className="mt-3 flex items-center justify-between text-xs text-muted">
         <span>
-          {tools} инструментов · {agents} подагента · {ms(data.totalMs)}
+          {tools} {tools === 1 ? 'инструмент' : tools > 1 && tools < 5 ? 'инструмента' : 'инструментов'} ·{' '}
+          {ms(data.totalMs)}
         </span>
-        <span className="num text-ink">{usd(data.costUsd)}</span>
+        <span className="num text-ink">{data.costUsd ? usd(data.costUsd) : 'бесплатно'}</span>
       </div>
     </Card>
   )

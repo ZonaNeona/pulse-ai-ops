@@ -1,360 +1,221 @@
-"""Unified Agent Runner: Hermes Agent + Built-in Fallback Tool Loop + Cache.
+"""One copilot turn, routed to the cheapest brain that can answer it honestly:
 
-Every turn executes against the unified tool registry in pulse.agents.tools.
-Traces are persisted in SQLite (ai_traces table) so the 'Under the Hood' screen
-displays live reasoning, tool calls, and spend metrics.
+1. a frequent question with a clear intent → `quick` (tools only, instant, free);
+2. a question about the company's rules → the knowledge module (answer with verified citations);
+3. anything else → Hermes Agent (tools over MCP, subagents) when it is up,
+   otherwise the built-in tool loop on the same tools through `core.llm`;
+4. no model at all → an honest note and what works without one.
+
+Whatever answered, the trace holds only what really happened, with measured times and the real cost.
 """
 
-import asyncio
 import json
-import logging
-import time
+import re
 import uuid
 from typing import Any
 
-import httpx
+from pulse.agents import hermes, quick, tools
+from pulse.agents import trace as traces
+from pulse.agents.trace import Trace
+from pulse.core import budget, clock, llm
+from pulse.core.visitor import Visitor
+from pulse.modules import knowledge
 
-from pulse import data
-from pulse.agents import cache, tools
-from pulse.core import budget, clock, db
-from pulse.core.config import get_settings
+MAX_TURNS = 5
+RULES = re.compile(
+    r"скидк|гаранти|регламент|политик|неустойк|рекламац|предоплат|аванс|возврат|можно ли|допуст|разреш|"
+    r"по правилам|кто согласует|согласован|срок\w* (выезд|ответ|перезвон|поставк|оплат)"
+)
 
-log = logging.getLogger(__name__)
+SYSTEM = """Ты — ИИ-помощник руководителя в компании «Норд Инжиниринг» (поставка и монтаж инженерного
+оборудования для бизнеса). Сегодня {today}. У тебя есть инструменты над CRM (Битрикс24), 1С, входящими
+документами и регламентами компании.
 
+Правила:
+- каждое число и имя бери из ответа инструмента; если данных нет — так и скажи, не придумывай;
+- для вопросов о правилах компании вызывай knowledge_search и ссылайся на документ и раздел;
+- изменить что-то в CRM ты не можешь: предложи действие через draft_task — человек сам подтвердит черновик;
+- отвечай по-русски, коротко: 2–6 строк, ключевые цифры и имена выделяй **так**, без таблиц и заголовков."""
 
-# --- Trace Storage -----------------------------------------------------------
+SOURCE = {
+    "sales_pulse": ("Обзор", "/"),
+    "get_signals": ("Сделать сейчас", "/"),
+    "team_status": ("Команда", "/sales/team"),
+    "get_deals": ("Сделки", "/sales/deals"),
+    "call_feed": ("Звонки", "/sales/calls"),
+    "call_review": ("Звонки", "/sales/calls"),
+    "reconciliation": ("Сверка CRM ↔ 1С", "/integrations"),
+    "erp_stock": ("1С", "/integrations"),
+    "docs_queue": ("Документы", "/docs"),
+    "knowledge_search": ("Знания", "/knowledge"),
+}
 
-
-def save_trace(trace: dict[str, Any], answer: str, sources: list[dict[str, Any]]) -> None:
-    now = clock.now().isoformat()
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO ai_traces(id, session_id, question, engine, model, total_ms, cost_usd, tokens, "
-            "steps_json, answer_text, sources_json, drafts_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                trace["id"],
-                trace.get("session_id", "default"),
-                trace["question"],
-                trace["engine"],
-                trace["model"],
-                trace["totalMs"],
-                trace["costUsd"],
-                trace["tokens"],
-                json.dumps(trace["steps"], ensure_ascii=False),
-                answer,
-                json.dumps(sources, ensure_ascii=False),
-                None,
-                now,
-            ),
-        )
-
-
-def get_latest_trace() -> dict[str, Any] | None:
-    with db.connect() as conn:
-        row = conn.execute("SELECT * FROM ai_traces ORDER BY created_at DESC LIMIT 1").fetchone()
-        if not row:
-            return None
-        return {
-            "id": row["id"],
-            "question": row["question"],
-            "engine": row["engine"],
-            "model": row["model"],
-            "startedAgo": "недавно",
-            "totalMs": row["total_ms"],
-            "costUsd": row["cost_usd"],
-            "tokens": row["tokens"],
-            "steps": json.loads(row["steps_json"]),
-        }
+WITHOUT_MODEL = (
+    "Свободные вопросы обрабатывает модель, а сейчас она недоступна: {reason}.\n"
+    "Без модели работают готовые вопросы — кто просел, зависшие сделки, сверка с 1С, худший звонок, "
+    "документы на проверке, пропущенные, просрочки, склад, выручка — и вопросы по регламентам."
+)
 
 
-# --- Fallback OpenAI Tool-Calling Loop ----------------------------------------
+def _reason(exc: Exception) -> str:
+    """«Дневной бюджет … исчерпан — до завтра …» → «дневной бюджет … исчерпан» (abbreviations keep their case)."""
+    text = str(exc).split(" — ")[0].rstrip(".")
+    return text[0].lower() + text[1:] if len(text) > 1 and text[1].islower() else text
 
 
-async def _run_fallback(
-    question: str, session_id: str, visitor_id: str
-) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
-    settings = get_settings()
-    api_key = settings.llm_api_key
-    base_url = settings.llm_base_url.rstrip("/")
+def _sources(used: list[str]) -> list[dict[str, str]]:
+    seen: dict[str, str] = {}
+    for name in used:
+        if name in SOURCE:
+            label, href = SOURCE[name]
+            seen.setdefault(label, href)
+    return [{"label": k, "href": v} for k, v in seen.items()]
 
-    if not api_key:
-        # No API key configured: graceful explanation
-        text = (
-            "Для ответа на произвольные вопросы подключите API-ключ OpenRouter или запустите профиль Hermes Agent. "
-            "Готовые вопросы о продажах, сверке и регламентах работают мгновенно из кэша."
-        )
-        fake_trace = {
-            "id": f"run_{uuid.uuid4().hex[:8]}",
-            "question": question,
-            "engine": "fallback",
-            "model": "запасной цикл (без ключа)",
-            "startedAgo": "только что",
-            "totalMs": 45,
-            "costUsd": 0.0,
-            "tokens": 0,
-            "steps": [
-                {
-                    "id": "s1",
-                    "kind": "llm",
-                    "name": "notice",
-                    "label": "Проверка API-ключа",
-                    "lane": "Резервный цикл",
-                    "startMs": 0,
-                    "durMs": 45,
-                    "detail": "Ключ не задан в .env",
-                }
-            ],
-        }
-        return text, [], fake_trace
 
-    reserve_id = budget.reserve(visitor_id, "question", estimated_usd=0.005)
-    started = time.monotonic()
-    steps: list[dict[str, Any]] = []
-    tool_specs = tools.get_specs()
-
-    messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": (
-                "Ты — ИИ-копилот операционной платформы «Пульс» компании «Норд Инжиниринг» "
-                "(поставка инженерного оборудования). "
-                "Отвечай строго на основе данных, вызывая доступные инструменты. Если данных нет, честно признайся. "
-                "Форматируй ответы в Markdown (выделяй ключевые цифры и имена полужирным). "
-                "Для действий (создание задач, смена стадий) используй draft-инструменты."
-            ),
-
-        },
-        {"role": "user", "content": question},
-    ]
-
-    total_tokens = 0
-    actual_cost = 0.0
-
+async def ask(question: str, visitor: Visitor) -> dict[str, Any]:
+    question = question.strip()[:800]
+    trace = Trace(question, visitor.session)
+    since = clock.now().isoformat()
+    token = tools.session.set(visitor.session)
     try:
-        async with httpx.AsyncClient(timeout=35) as client:
-            # Plan step
-            steps.append({
-                "id": f"s_{uuid.uuid4().hex[:6]}",
-                "kind": "llm",
-                "name": "plan",
-                "label": "Анализ запроса",
-                "lane": "Резервный цикл",
-                "startMs": 0,
-                "durMs": 200,
-            })
-
-            # Multi-turn tool execution loop (max 3 turns)
-            for _ in range(3):
-                resp = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": settings.llm_model,
-                        "messages": messages,
-                        "tools": tool_specs,
-                        "temperature": 0.2,
-                    },
-                )
-                resp.raise_for_status()
-                data_resp = resp.json()
-
-                usage = data_resp.get("usage", {})
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens += prompt_tokens + completion_tokens
-                # OpenRouter / DeepSeek approx pricing: $0.14 / 1M prompt, $0.28 / 1M completion
-                actual_cost += (prompt_tokens * 0.14 + completion_tokens * 0.28) / 1_000_000
-
-                choice = data_resp["choices"][0]["message"]
-                messages.append(choice)
-
-                tool_calls = choice.get("tool_calls")
-                if not tool_calls:
-                    # Model provided final text
-                    break
-
-                for tc in tool_calls:
-                    fn_name = tc["function"]["name"]
-                    fn_args = json.loads(tc["function"]["arguments"] or "{}")
-                    t_tool_start = int((time.monotonic() - started) * 1000)
-
-                    try:
-                        tool_out = tools.run_tool(fn_name, fn_args)
-                    except Exception as exc:
-                        tool_out = {"error": str(exc)}
-
-                    dur_ms = max(20, int((time.monotonic() - started) * 1000) - t_tool_start)
-                    steps.append({
-                        "id": f"s_{uuid.uuid4().hex[:6]}",
-                        "kind": "tool",
-                        "name": fn_name,
-                        "label": f"{fn_name}()",
-                        "lane": "Резервный цикл",
-                        "startMs": t_tool_start,
-                        "durMs": dur_ms,
-                        "detail": str(tool_out)[:120],
-                    })
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": json.dumps(tool_out, ensure_ascii=False, default=str),
-                    })
-
-        total_ms = int((time.monotonic() - started) * 1000)
-        final_text = messages[-1].get("content") or "Ответ сформирован."
-        budget.settle(reserve_id, actual_usd=actual_cost, details={"tokens": total_tokens})
-
-        trace = {
-            "id": f"run_{uuid.uuid4().hex[:8]}",
-            "session_id": session_id,
-            "question": question,
-            "engine": "fallback",
-            "model": settings.llm_model,
-            "startedAgo": "только что",
-            "totalMs": total_ms,
-            "costUsd": round(actual_cost, 5),
-            "tokens": total_tokens,
-            "steps": steps,
-        }
-        return final_text, [{"label": "Данные CRM/1С", "href": "/"}], trace
-
-    except Exception as exc:
-        log.exception("fallback runner failed")
-        budget.settle(reserve_id, actual_usd=0.0, details={"error": str(exc)})
-        # Graceful fallback on error
-        err_text = f"Не удалось выполнить внешний запрос ({type(exc).__name__}). Воспользуйтесь готовыми вопросами."
-        fake_trace = {
-            "id": f"run_{uuid.uuid4().hex[:8]}",
-            "question": question,
-            "engine": "fallback",
-            "model": settings.llm_model,
-            "startedAgo": "только что",
-            "totalMs": int((time.monotonic() - started) * 1000),
-            "costUsd": 0.0,
-            "tokens": 0,
-            "steps": steps,
-        }
-        return err_text, [], fake_trace
-
-
-# --- Hermes Agent API Client -------------------------------------------------
-
-
-async def _run_hermes(
-    question: str, session_id: str, visitor_id: str
-) -> tuple[str, list[dict[str, Any]], dict[str, Any]] | None:
-    settings = get_settings()
-    if not settings.hermes_api_url or not settings.hermes_api_key:
-        return None
-
-    started = time.monotonic()
-    url = settings.hermes_api_url.rstrip("/")
-    headers = {"Authorization": f"Bearer {settings.hermes_api_key}"}
-
-    try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            resp = await client.post(
-                f"{url}/v1/runs",
-                headers=headers,
-                json={"input": question, "session_id": session_id or "pulse_main"},
-            )
-            resp.raise_for_status()
-            started_data = resp.json()
-            run_id = started_data.get("run_id") or started_data.get("id")
-
-            # In a full SSE setup we stream /v1/runs/{id}/events; here we await run completion
-            # or poll status with timeout
-            output = started_data.get("output", "")
-            if not output:
-                # Poll run status up to 20 seconds
-                for _ in range(20):
-                    await asyncio.sleep(1)
-                    poll_resp = await client.get(f"{url}/v1/runs/{run_id}", headers=headers)
-                    if poll_resp.status_code == 200:
-                        status_body = poll_resp.json()
-                        if status_body.get("status") in ("completed", "done"):
-                            output = status_body.get("output", "")
-                            break
-
-            total_ms = int((time.monotonic() - started) * 1000)
-            trace = {
-                "id": run_id or f"run_{uuid.uuid4().hex[:8]}",
-                "session_id": session_id,
-                "question": question,
-                "engine": "hermes",
-                "model": "Hermes Agent (FastMCP)",
-                "startedAgo": "только что",
-                "totalMs": total_ms,
-                "costUsd": 0.005,
-                "tokens": 2800,
-                "steps": [
-                    {
-                        "id": "s_hermes",
-                        "kind": "subagent",
-                        "name": "hermes_turn",
-                        "label": "Hermes Multi-agent Turn",
-                        "lane": "Hermes",
-                        "startMs": 0,
-                        "durMs": total_ms,
-                    }
-                ],
-            }
-            return output or "Ход выполнен Hermes Agent.", [{"label": "Hermes MCP", "href": "/under-the-hood"}], trace
-    except Exception as exc:
-        log.warning("Hermes agent run error: %s, falling back", exc)
-        return None
-
-
-# --- Main Entry Point --------------------------------------------------------
-
-
-async def answer(
-    question: str, session_id: str = "", visitor_id: str = ""
-) -> dict[str, Any]:
-    """Answers a user question via Cache, Hermes Agent, or Built-in Fallback Runner."""
-    d = data.load()
-
-    # 1. Check instant grounded cache
-    cached = cache.find_answer(question, d)
-    if cached:
-        trace = cache.build_trace(question, cached)
-        save_trace(trace, cached["text"], cached["sources"])
-        return {
-            "id": f"msg_{uuid.uuid4().hex[:8]}",
-            "role": "assistant",
-            "text": cached["text"],
-            "sources": cached["sources"],
-            "trace": trace,
-            "cached": True,
-        }
-
-    # 2. Try Hermes Agent if configured
-    hermes_res = await _run_hermes(question, session_id, visitor_id)
-    if hermes_res:
-        text, sources, trace = hermes_res
-        save_trace(trace, text, sources)
-        return {
-            "id": f"msg_{uuid.uuid4().hex[:8]}",
-            "role": "assistant",
-            "text": text,
-            "sources": sources,
-            "trace": trace,
-            "cached": False,
-        }
-
-    # 3. Built-in fallback tool-calling loop
-    text, sources, trace = await _run_fallback(question, session_id, visitor_id)
-    save_trace(trace, text, sources)
+        text, sources = await _answer(question, visitor, trace)
+    finally:
+        tools.session.reset(token)
+    traces.save(trace, text, sources)
+    created = [d for d in tools.drafts(visitor.session) if d["created_at"] >= since]
     return {
-        "id": f"msg_{uuid.uuid4().hex[:8]}",
+        "id": f"a_{uuid.uuid4().hex[:8]}",
         "role": "assistant",
         "text": text,
         "sources": sources,
-        "trace": trace,
-        "cached": False,
+        "engine": trace.engine,
+        "trace": trace.to_dict(),
+        "drafts": [draft_view(d) for d in created],
     }
+
+
+def draft_view(d: dict[str, Any]) -> dict[str, Any]:
+    p = d["payload"]
+    return {
+        "draft_id": d["id"],
+        "status": d["status"],
+        "title": d["title"],
+        "responsible": p.get("responsible", ""),
+        "deadline": p.get("deadline", "")[:10],
+        "dealId": p.get("deal_id"),
+    }
+
+
+async def _answer(question: str, visitor: Visitor, trace: Trace) -> tuple[str, list[dict[str, str]]]:
+    with trace.step("route", "router", "Маршрутизация вопроса", "Маршрутизатор") as info:
+        handler = quick.match(question)
+        rules = handler is None and bool(RULES.search(question.lower()))
+        info["detail"] = "готовый вопрос" if handler else "регламенты" if rules else "свободный вопрос"
+    if handler:
+        trace.engine = "rules"
+        reply = await handler(trace, question)
+        return reply.text, reply.sources
+    if rules:
+        return await _knowledge(question, visitor, trace)
+    if hermes.configured() and llm.available():
+        try:
+            return await _hermes(question, visitor, trace)
+        except hermes.HermesUnavailable as exc:
+            trace.add(
+                "llm",
+                "hermes",
+                "Hermes недоступен — отвечает встроенный цикл",
+                "Hermes",
+                trace.elapsed(),
+                0.1,
+                str(exc),
+            )
+    return await _loop(question, visitor, trace)
+
+
+async def _knowledge(question: str, visitor: Visitor, trace: Trace) -> tuple[str, list[dict[str, str]]]:
+    trace.engine = "kb"
+    with trace.step("tool", "knowledge", "Поиск по регламентам и ответ", "База знаний") as info:
+        ans = await knowledge.answer(question, visitor.quota)
+        info["detail"] = {
+            "model": "ответ модели, цитаты проверены",
+            "extract": "выдержки из регламентов",
+            "refusal": "в регламентах нет",
+        }[ans.mode]
+        info["cost"] = ans.cost_usd
+    trace.model = ans.model
+    text = ans.text
+    if ans.sources:
+        text += "\n\n" + "\n".join(f"[{s.id}] {s.title}, {s.section}" for s in ans.sources)
+    if ans.note:
+        text += f"\n\n{ans.note}."
+    return text, [{"label": "Знания", "href": "/knowledge?q=" + question[:120]}] if ans.grounded else []
+
+
+async def _hermes(question: str, visitor: Visitor, trace: Trace) -> tuple[str, list[dict[str, str]]]:
+    try:
+        reserve_id = budget.reserve(visitor.quota, "question", llm.ESTIMATE_USD["question"])
+    except RuntimeError as exc:
+        trace.engine = "none"
+        return WITHOUT_MODEL.format(reason=_reason(exc)), []
+    trace.engine = "hermes"
+    try:
+        res = await hermes.run(question, visitor.session, trace)
+    except hermes.HermesUnavailable:
+        budget.settle(reserve_id, 0.0, {"error": "hermes"})
+        raise
+    budget.settle(
+        reserve_id,
+        res.cost_usd,
+        {"engine": "hermes", "tokens": res.prompt_tokens + res.completion_tokens, "model": res.model},
+    )
+    trace.model = res.model
+    trace.tokens = res.prompt_tokens + res.completion_tokens
+    trace.cost_usd = res.cost_usd or llm.ESTIMATE_USD["question"]  # no reported cost: the estimate stays booked
+    return res.text or "Hermes не дал ответа — переформулируйте вопрос.", _sources(res.tools)
+
+
+async def _loop(question: str, visitor: Visitor, trace: Trace) -> tuple[str, list[dict[str, str]]]:
+    """The built-in agent: the model chooses tools, we run them, up to MAX_TURNS rounds."""
+    trace.engine = "model"
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM.format(today=f"{clock.today():%d.%m.%Y}")},
+        {"role": "user", "content": question},
+    ]
+    used: list[str] = []
+    for turn in range(MAX_TURNS):
+        start = trace.elapsed()
+        try:
+            res = await llm.chat(messages, visitor=visitor.quota, tools=tools.specs(), reserve=turn == 0)
+        except llm.LlmUnavailable as exc:
+            if turn == 0:
+                trace.engine = "none"
+                return WITHOUT_MODEL.format(reason=_reason(exc)), []
+            return "Модель перестала отвечать посреди ответа — попробуйте ещё раз.", _sources(used)
+        calls = res.message.get("tool_calls") or []
+        trace.model = res.model
+        trace.tokens += res.tokens
+        what = ", ".join(c["function"]["name"] for c in calls) if calls else "ответ"
+        trace.add("llm", "model", f"Модель: {what}", "Модель", start, res.ms, f"{res.tokens} ток.", res.cost_usd)
+        if not calls:
+            return res.text or "Модель не дала ответа — переформулируйте вопрос.", _sources(used)
+        messages.append({"role": "assistant", "content": res.message.get("content") or "", "tool_calls": calls})
+        for c in calls:
+            name = c["function"]["name"]
+            try:
+                args = json.loads(c["function"].get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            result = await quick.call(trace, name, args if isinstance(args, dict) else {})
+            used.append(name)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": c["id"],
+                    "content": json.dumps(result, ensure_ascii=False, default=str)[:12_000],
+                }
+            )
+    return "Вопрос оказался слишком составным для одного хода — разбейте его на части.", _sources(used)
+
+
+latest = traces.latest
