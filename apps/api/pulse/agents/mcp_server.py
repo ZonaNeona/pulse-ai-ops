@@ -108,6 +108,30 @@ def mcp_undo_draft(draft_id: str) -> dict[str, Any]:
     return tools.tool_undo_draft(draft_id)
 
 
+@server.tool(
+    name="docs_queue",
+    description="Очередь входящих документов (счета, акты, УПД, договоры), ожидающих подтверждения человека.",
+)
+def mcp_docs_queue() -> list[dict[str, Any]]:
+    return tools.tool_docs_queue()
+
+
+@server.tool(
+    name="review_doc",
+    description="Проверить статус документа, шаги графа LangGraph и расхождения со сверкой 1С/CRM.",
+)
+def mcp_review_doc(doc_id: int) -> dict[str, Any]:
+    return tools.tool_review_doc(doc_id)
+
+
+@server.tool(
+    name="confirm_doc",
+    description="Подтвердить проводку документа в 1С (Human-in-the-loop).",
+)
+def mcp_confirm_doc(doc_id: int) -> dict[str, Any]:
+    return tools.tool_confirm_doc(doc_id)
+
+
 def main() -> None:
     server.run(transport="stdio")
 

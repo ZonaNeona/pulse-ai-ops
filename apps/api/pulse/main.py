@@ -38,7 +38,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Pulse", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
+    title="Pulse", version=__version__, docs_url="/api/swagger", openapi_url="/api/openapi.json", lifespan=lifespan
 )
 app.include_router(router)
 

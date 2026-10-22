@@ -72,6 +72,26 @@ CREATE TABLE IF NOT EXISTS ai_drafts (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai_drafts_session ON ai_drafts(session_id);
+CREATE TABLE IF NOT EXISTS docs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    kind_label TEXT NOT NULL,
+    number TEXT NOT NULL,
+    date TEXT NOT NULL,
+    counterparty TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    received_ago TEXT NOT NULL,
+    steps_json TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    checks_json TEXT NOT NULL,
+    raw_text TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS docs_session ON docs(session_id);
 
 """
 

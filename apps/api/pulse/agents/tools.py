@@ -13,6 +13,7 @@ from typing import Any
 
 from pulse import data
 from pulse.core import clock, db
+from pulse.modules import docs as docs_mod
 from pulse.modules import integrations, overview
 from pulse.modules.sales import calls, deals, pulse, signals, team
 
@@ -179,6 +180,27 @@ def tool_undo_draft(draft_id: str) -> dict[str, Any]:
     return {"status": "undone", "draft_id": draft_id}
 
 
+def tool_docs_queue() -> list[dict[str, Any]]:
+    """Returns incoming documents that require human review or confirmation."""
+    items = docs_mod.list_docs()
+    waiting = [d for d in items if d.status in ("mismatch", "review")]
+    return [d.to_dict() for d in waiting]
+
+
+def tool_review_doc(doc_id: int) -> dict[str, Any]:
+    """Returns full details of an incoming document, its LangGraph steps, and 1C/CRM checks."""
+    doc = docs_mod.get_doc(doc_id)
+    if not doc:
+        return {"error": f"Документ #{doc_id} не найден"}
+    return doc.to_dict()
+
+
+def tool_confirm_doc(doc_id: int) -> dict[str, Any]:
+    """Human-in-the-loop confirmation of a document: posts it to 1C."""
+    doc = docs_mod.confirm_doc(doc_id)
+    return {"status": doc.status, "message": f"Документ {doc.number} успешно проведён в 1С"}
+
+
 # --- Tool Definitions & Schemas ----------------------------------------------
 
 REGISTRY: dict[str, tuple[dict[str, Any], Callable[..., Any]]] = {
@@ -337,6 +359,45 @@ REGISTRY: dict[str, tuple[dict[str, Any], Callable[..., Any]]] = {
             },
         },
         tool_undo_draft,
+    ),
+    "docs_queue": (
+        {
+            "name": "docs_queue",
+            "description": "Очередь входящих документов (счета, акты, УПД), ожидающих подтверждения человека.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+        tool_docs_queue,
+    ),
+    "review_doc": (
+        {
+            "name": "review_doc",
+            "description": "Проверить статус документа, шаги графа LangGraph и расхождения со сверкой 1С/CRM.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {"type": "integer", "description": "ID документа"},
+                },
+                "required": ["doc_id"],
+            },
+        },
+        tool_review_doc,
+    ),
+    "confirm_doc": (
+        {
+            "name": "confirm_doc",
+            "description": "Подтвердить проводку документа в 1С (Human-in-the-loop).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {"type": "integer", "description": "ID документа"},
+                },
+                "required": ["doc_id"],
+            },
+        },
+        tool_confirm_doc,
     ),
 }
 

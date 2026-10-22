@@ -1,11 +1,13 @@
+import { useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { AlertTriangle, Check, CircleDashed, FileUp, Loader2, X } from 'lucide-react'
 import type { DocItem, DocStatus, GraphStep, StepStatus } from '@/api/types'
-import { useBudget, useDocs } from '@/api/queries'
+import { confirmDoc, rejectDoc, uploadDoc, useBudget, useDocs } from '@/api/queries'
 import { navigate, useRoute, withQuery } from '@/app/router'
 import { Meter } from '@/ui/charts'
 import { ms, rub } from '@/ui/format'
-import { Badge, Button, Card, CardHeader, Empty, PageHeader, PreviewBanner, Skeleton, type Tone } from '@/ui/kit'
+import { Badge, Button, Card, CardHeader, Empty, Notice, PageHeader, Skeleton, type Tone } from '@/ui/kit'
 import { useToast } from '@/ui/Toast'
 
 const STATUS: Record<DocStatus, { label: string; tone: Tone }> = {
@@ -21,6 +23,11 @@ export function Documents() {
   if (!data) return <Skeleton className="h-[600px]" />
   const selected = data.find((d) => String(d.id) === query.get('id')) ?? data[0]
   const waiting = data.filter((d) => d.status === 'mismatch' || d.status === 'review').length
+
+  const handleUploaded = (created: DocItem) => {
+    navigate(withQuery('/docs', { id: String(created.id) }), { replace: true })
+  }
+
   return (
     <>
       <PageHeader
@@ -29,58 +36,130 @@ export function Documents() {
         description="Счета, договоры, УПД и акты проходят граф LangGraph: тип → поля → сверка с 1С и CRM → подтверждение человеком → проводка."
         actions={<Badge tone={waiting ? 'warning' : 'success'}>{waiting} ждут человека</Badge>}
       />
-      <PreviewBanner what="граф LangGraph и загрузка своих счетов появятся в следующем обновлении." />
+      <Notice tone="neutral" className="mb-4">
+        <div className="flex w-full flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-semibold text-ink">LangGraph StateGraph:</span>
+            <span className="text-muted">
+              classify → extract → validate (1C/CRM) → review (human-in-the-loop) → draft (1C)
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
+            <span>SQLite thread checkpoints</span>
+            <span>•</span>
+            <span>Сверка: 1С (ЗП-0388)</span>
+          </div>
+        </div>
+      </Notice>
       <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <div className="flex flex-col gap-3">
-          <Upload />
+          <Upload onUploaded={handleUploaded} />
           <Card padded={false}>
-            <ul className="divide-y divide-line">
-              {data.map((d) => (
-                <li key={d.id}>
-                  <button
-                    onClick={() => navigate(withQuery('/docs', { id: String(d.id) }), { replace: true })}
-                    className={clsx(
-                      'flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors',
-                      d.id === selected.id ? 'bg-accent-soft/60' : 'hover:bg-surface-2/60',
-                    )}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 text-sm font-medium text-ink">
-                        {d.kindLabel} {d.number}
+            {data.length === 0 ? (
+              <Empty title="Документов нет" text="Загрузите первый файл выше" />
+            ) : (
+              <ul className="divide-y divide-line">
+                {data.map((d) => (
+                  <li key={d.id}>
+                    <button
+                      onClick={() => navigate(withQuery('/docs', { id: String(d.id) }), { replace: true })}
+                      className={clsx(
+                        'flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors',
+                        selected && d.id === selected.id ? 'bg-accent-soft/60' : 'hover:bg-surface-2/60',
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                          {d.kindLabel} {d.number}
+                        </div>
+                        <div className="mt-0.5 truncate text-xs text-muted">{d.counterparty}</div>
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-muted">{d.counterparty}</div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="num text-sm text-ink">{rub(d.amount)}</span>
-                      <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Badge>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="num text-sm text-ink">{rub(d.amount)}</span>
+                        <Badge tone={STATUS[d.status]?.tone ?? 'neutral'}>{STATUS[d.status]?.label ?? d.status}</Badge>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
-        <DocDetail doc={selected} />
+        {selected ? (
+          <DocDetail doc={selected} />
+        ) : (
+          <Card>
+            <Empty title="Выберите документ" text="Слева в списке или загрузите свой" />
+          </Card>
+        )}
       </div>
     </>
   )
 }
 
-function Upload() {
+function Upload({ onUploaded }: { onUploaded?: (doc: DocItem) => void }) {
   const { data: budget } = useBudget()
   const toast = useToast()
+  const queryClient = useQueryClient()
+  const [uploading, setUploading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const isExhausted = budget ? budget.documentsLeft <= 0 : false
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const created = await uploadDoc(file)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['docs'] }),
+        queryClient.invalidateQueries({ queryKey: ['budget'] }),
+        queryClient.invalidateQueries({ queryKey: ['overview'] }),
+      ])
+      toast(`Документ «${created.kindLabel} ${created.number}» обработан в LangGraph`, 'success')
+      onUploaded?.(created)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка обработки документа'
+      toast(msg, 'danger')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
   return (
-    <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed border-line-strong bg-surface px-4 py-5 text-center transition-colors hover:border-accent">
-      <FileUp size={18} className="text-muted" />
-      <span className="text-sm font-medium text-ink">Загрузите свой счёт или акт</span>
+    <label
+      className={clsx(
+        'flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-line-strong bg-surface px-4 py-5 text-center transition-colors',
+        uploading
+          ? 'cursor-wait bg-surface-2/40 opacity-70'
+          : isExhausted
+            ? 'cursor-not-allowed opacity-60'
+            : 'cursor-pointer hover:border-accent hover:bg-surface-2/30',
+      )}
+    >
+      {uploading ? (
+        <Loader2 size={18} className="animate-spin text-accent" />
+      ) : (
+        <FileUp size={18} className="text-muted" />
+      )}
+      <span className="text-sm font-medium text-ink">
+        {uploading ? 'Обработка в LangGraph...' : 'Загрузите свой счёт или акт'}
+      </span>
       <span className="text-xs text-muted">
-        PDF или фото, до 5 МБ · осталось {budget?.documentsLeft ?? '—'} из {budget?.documentsCap ?? '—'} сегодня
+        {uploading
+          ? 'Распознавание → извлечение → сверка с 1С'
+          : `PDF, фото или текст · осталось ${budget?.documentsLeft ?? '—'} из ${budget?.documentsCap ?? '—'} сегодня`}
       </span>
       <input
+        ref={inputRef}
         type="file"
-        accept=".pdf,image/*"
+        accept=".pdf,.png,.jpg,.jpeg,.txt"
+        disabled={uploading || isExhausted}
         className="sr-only"
-        onChange={() => toast('В демо-версии дизайна загрузка ещё не подключена')}
+        onChange={handleFile}
       />
     </label>
   )
@@ -106,7 +185,7 @@ function Graph({ steps }: { steps: GraphStep[] }) {
     <ol className="grid gap-2 sm:grid-cols-5">
       {steps.map((s, i) => (
         <li key={s.node} className="relative">
-          {i > 0 && <span className="absolute top-3.5 -left-2 hidden h-px w-2 bg-line-strong sm:block" />}
+          {i > 0 && <span className="absolute -left-2 top-3.5 hidden h-px w-2 bg-line-strong sm:block" />}
           <div className={clsx('flex h-full flex-col gap-1 rounded-md border p-2.5', STEP_TONE[s.status])}>
             <div className="flex items-center gap-1.5 text-xs font-medium">
               {STEP_ICON[s.status]}
@@ -126,7 +205,44 @@ function Graph({ steps }: { steps: GraphStep[] }) {
 
 function DocDetail({ doc }: { doc: DocItem }) {
   const toast = useToast()
+  const queryClient = useQueryClient()
+  const [submitting, setSubmitting] = useState(false)
   const needsHuman = doc.status === 'mismatch' || doc.status === 'review'
+
+  const handleConfirm = async () => {
+    setSubmitting(true)
+    try {
+      await confirmDoc(doc.id)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['docs'] }),
+        queryClient.invalidateQueries({ queryKey: ['overview'] }),
+      ])
+      toast(`Документ ${doc.number} подтверждён, черновик в 1С создан`, 'success')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка подтверждения'
+      toast(msg, 'danger')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleReject = async () => {
+    setSubmitting(true)
+    try {
+      await rejectDoc(doc.id)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['docs'] }),
+        queryClient.invalidateQueries({ queryKey: ['overview'] }),
+      ])
+      toast('Поставщику отправлен запрос на исправление документа', 'neutral')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка отклонения'
+      toast(msg, 'danger')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Card>
@@ -142,8 +258,8 @@ function DocDetail({ doc }: { doc: DocItem }) {
               {doc.counterparty} · <span className="num text-ink">{rub(doc.amount)}</span>
             </div>
           </div>
-          <Badge tone={STATUS[doc.status].tone} dot>
-            {STATUS[doc.status].label}
+          <Badge tone={STATUS[doc.status]?.tone ?? 'neutral'} dot>
+            {STATUS[doc.status]?.label ?? doc.status}
           </Badge>
         </div>
         <div className="mt-4">
@@ -203,14 +319,21 @@ function DocDetail({ doc }: { doc: DocItem }) {
               ))}
             </ul>
           )}
-          {needsHuman && (
+          {needsHuman ? (
             <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
-              <Button onClick={() => toast('Черновик проводки создан в 1С (демо)', 'success')}>Подтвердить и провести</Button>
-              <Button variant="secondary" onClick={() => toast('Отправлено поставщику: запрос исправленного счёта')}>
+              <Button disabled={submitting} onClick={handleConfirm}>
+                {submitting ? 'Проводка...' : 'Подтвердить и провести'}
+              </Button>
+              <Button disabled={submitting} variant="secondary" onClick={handleReject}>
                 Запросить исправление
               </Button>
             </div>
-          )}
+          ) : doc.status === 'posted' ? (
+            <div className="mt-5 flex items-center gap-2 border-t border-line pt-4 text-xs text-success">
+              <Check size={14} />
+              <span>Черновик проведён в 1С:Управление торговлей (документ закрыт)</span>
+            </div>
+          ) : null}
         </Card>
       </div>
     </div>

@@ -21,12 +21,42 @@ import type {
   TraceRun,
 } from './types'
 
+export function getVisitorId(): string {
+  if (typeof window === 'undefined') return 'default'
+  let id = localStorage.getItem('pulse_visitor_id')
+  if (!id) {
+    id = 'v_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+    localStorage.setItem('pulse_visitor_id', id)
+  }
+  return id
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const visitorId = getVisitorId()
+  const isForm = typeof FormData !== 'undefined' && init?.body instanceof FormData
+  const headers: Record<string, string> = {
+    'X-Visitor-Id': visitorId,
+    ...(init?.headers as Record<string, string>),
+  }
+  if (!isForm && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
+  }
   const res = await fetch('/api' + path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers,
   })
-  if (!res.ok) throw new Error(res.status === 404 ? 'Не найдено' : `Сервер ответил ${res.status}`)
+  if (!res.ok) {
+    let msg = res.status === 404 ? 'Не найдено' : `Сервер ответил ${res.status}`
+    try {
+      const err = await res.json()
+      if (err?.detail) {
+        msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(msg)
+  }
   return (await res.json()) as T
 }
 
@@ -55,8 +85,27 @@ export const useSyncLog = () => useData<SyncEvent[]>('sync-log', () => api('/int
 export const useReconciliation = () => useData<Reconciliation>('recon', () => api('/integrations/reconciliation'))
 export const useBudget = () => useData<Budget>('budget', () => api('/budget'), LIVE)
 
+// Module 06 (Docs) is live with LangGraph and SQLite checkpoints
+export const useDocs = () => useData<DocItem[]>('docs', () => api('/docs'), LIVE)
+
+export async function confirmDoc(id: number): Promise<DocItem> {
+  return api<DocItem>(`/docs/${id}/confirm`, { method: 'POST' })
+}
+
+export async function rejectDoc(id: number): Promise<DocItem> {
+  return api<DocItem>(`/docs/${id}/reject`, { method: 'POST' })
+}
+
+export async function uploadDoc(file: File): Promise<DocItem> {
+  const data = new FormData()
+  data.append('file', file)
+  return api<DocItem>('/docs/upload', {
+    method: 'POST',
+    body: data,
+  })
+}
+
 // Design dataset until their modules land.
-export const useDocs = () => useData<DocItem[]>('docs', local(demo.DOCS))
 export const useKbStats = () => useData<KbStats>('kb-stats', local(demo.KB_STATS))
 export const useKbAnswer = () => useData<KbAnswer>('kb-answer', local(demo.KB_ANSWER))
 export const useLastTrace = () => useData<TraceRun>('trace', () => api('/trace/latest'), LIVE)

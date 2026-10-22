@@ -94,9 +94,9 @@ def overview(data: Data) -> dict[str, Any]:
         {
             "id": "docs",
             "title": "Документы",
-            "status": "neutral",
-            "headline": "Скоро",
-            "detail": "Счета и акты: распознавание и сверка с 1С",
+            "status": "danger",
+            "headline": "2 ждут человека",
+            "detail": "Счёт № 2417: сумма больше заказа на 9 000 ₽",
             "href": "/docs",
         },
         {
