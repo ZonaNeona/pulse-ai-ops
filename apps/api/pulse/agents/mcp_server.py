@@ -132,6 +132,15 @@ def mcp_confirm_doc(doc_id: int) -> dict[str, Any]:
     return tools.tool_confirm_doc(doc_id)
 
 
+@server.tool(
+    name="knowledge_search",
+    description="Поиск по базе регламентов компании 'Норд Инжиниринг' (цены, скидки, гарантии, стандарты монтажа).",
+)
+def mcp_knowledge_search(query: str, limit: int = 3) -> dict[str, Any]:
+    return tools.tool_knowledge_search(query, limit)
+
+
+
 def main() -> None:
     server.run(transport="stdio")
 

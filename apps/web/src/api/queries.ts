@@ -105,8 +105,21 @@ export async function uploadDoc(file: File): Promise<DocItem> {
   })
 }
 
+// Module 07 (Knowledge & RAG) is live
+export const useKbStats = () => useData<KbStats>('kb-stats', () => api('/kb/stats'), LIVE)
+export const useKbAnswer = (q?: string) =>
+  useQuery({
+    queryKey: ['kb-answer', q ?? 'default'],
+    queryFn: () => api<KbAnswer>(q ? `/kb/answer?q=${encodeURIComponent(q)}` : '/kb/answer'),
+  })
+
+export async function askKb(question: string): Promise<KbAnswer> {
+  return api<KbAnswer>('/kb/ask', {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  })
+}
+
 // Design dataset until their modules land.
-export const useKbStats = () => useData<KbStats>('kb-stats', local(demo.KB_STATS))
-export const useKbAnswer = () => useData<KbAnswer>('kb-answer', local(demo.KB_ANSWER))
 export const useLastTrace = () => useData<TraceRun>('trace', () => api('/trace/latest'), LIVE)
 export const useChat = () => useData<ChatMessage[]>('chat', local(demo.CHAT))

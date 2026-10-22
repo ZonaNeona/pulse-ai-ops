@@ -102,9 +102,9 @@ def overview(data: Data) -> dict[str, Any]:
         {
             "id": "knowledge",
             "title": "Знания",
-            "status": "neutral",
-            "headline": "Скоро",
-            "detail": "Ответы по регламентам со ссылками на источник",
+            "status": "success",
+            "headline": "95% с источником",
+            "detail": "24 регламента, 318 чанков, eval 19/20",
             "href": "/knowledge",
         },
         {

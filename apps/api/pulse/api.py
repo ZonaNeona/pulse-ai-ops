@@ -11,6 +11,7 @@ from pulse.agents import cache, runner, tools
 from pulse.core import budget, db
 from pulse.modules import docs as docs_mod
 from pulse.modules import integrations, overview
+from pulse.modules import knowledge as kb_mod
 from pulse.modules.sales import calls, deals, pulse, signals, team
 
 router = APIRouter(prefix="/api")
@@ -268,4 +269,44 @@ async def upload_document(
     except Exception as e:
         budget.settle(res_id, actual_usd=0.0)
         raise HTTPException(status_code=500, detail=f"Ошибка обработки документа: {e}") from e
+
+
+# --- Knowledge Module (RAG & Eval) -------------------------------------------
+
+
+class AskKbRequest(BaseModel):
+    question: str
+
+
+@router.get("/kb/stats")
+def get_kb_stats() -> dict[str, Any]:
+    """Overall knowledge base quality metrics, chunk count and eval benchmark results."""
+    return kb_mod.get_stats().to_dict()
+
+
+@router.get("/kb/answer")
+def get_kb_answer(
+    q: str = "Какая скидка допустима для дилера без согласования с директором?",
+) -> dict[str, Any]:
+    """Answers a question grounded in company regulations with citations [1], [2]."""
+    return kb_mod.answer_question(q).to_dict()
+
+
+@router.post("/kb/ask")
+def post_kb_ask(req: AskKbRequest) -> dict[str, Any]:
+    """Answers a question grounded in company regulations with citations [1], [2]."""
+    return kb_mod.answer_question(req.question).to_dict()
+
+
+@router.get("/kb/documents")
+def get_kb_documents() -> list[dict[str, Any]]:
+    """List of all regulations in the knowledge base with their categories and chunk counts."""
+    return [d.to_dict() for d in kb_mod.get_documents()]
+
+
+@router.get("/kb/eval")
+def get_kb_eval() -> dict[str, Any]:
+    """Runs or returns the golden evaluation benchmark suite for RAG faithfulness and refusals."""
+    return kb_mod.run_eval()
+
 

@@ -93,6 +93,43 @@ CREATE TABLE IF NOT EXISTS docs (
 );
 CREATE INDEX IF NOT EXISTS docs_session ON docs(session_id);
 
+CREATE TABLE IF NOT EXISTS kb_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kb_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id INTEGER NOT NULL,
+    doc_title TEXT NOT NULL,
+    section TEXT NOT NULL,
+    text TEXT NOT NULL,
+    keywords TEXT NOT NULL,
+    FOREIGN KEY (doc_id) REFERENCES kb_documents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS kb_chunks_doc ON kb_chunks(doc_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunks_fts USING fts5(
+    chunk_id UNINDEXED,
+    doc_title,
+    section,
+    text,
+    tokenize='unicode61'
+);
+CREATE TABLE IF NOT EXISTS kb_eval_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    is_refusal INTEGER NOT NULL,
+    answer TEXT NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+
 """
 
 

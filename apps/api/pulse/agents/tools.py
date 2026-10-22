@@ -201,6 +201,20 @@ def tool_confirm_doc(doc_id: int) -> dict[str, Any]:
     return {"status": doc.status, "message": f"Документ {doc.number} успешно проведён в 1С"}
 
 
+def tool_knowledge_search(query: str, limit: int = 3) -> dict[str, Any]:
+    """Search company regulations knowledge base (pricing, discounts, warranty, installation standards, claims)."""
+    from pulse.modules import knowledge as kb_mod
+
+    ans = kb_mod.answer_question(query)
+    chunks = kb_mod.search_chunks(query, limit=limit)
+    return {
+        "grounded": ans.grounded,
+        "answer": ans.answer,
+        "sources": [s.to_dict() for s in ans.sources],
+        "chunks": chunks,
+    }
+
+
 # --- Tool Definitions & Schemas ----------------------------------------------
 
 REGISTRY: dict[str, tuple[dict[str, Any], Callable[..., Any]]] = {
@@ -398,6 +412,24 @@ REGISTRY: dict[str, tuple[dict[str, Any], Callable[..., Any]]] = {
             },
         },
         tool_confirm_doc,
+    ),
+    "knowledge_search": (
+        {
+            "name": "knowledge_search",
+            "description": (
+                "Поиск по базе регламентов компании 'Норд Инжиниринг' "
+                "(цены, скидки, гарантии, стандарты монтажа, рекламации)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Поисковый запрос или вопрос по регламентам"},
+                    "limit": {"type": "integer", "description": "Количество фрагментов", "default": 3},
+                },
+                "required": ["query"],
+            },
+        },
+        tool_knowledge_search,
     ),
 }
 
