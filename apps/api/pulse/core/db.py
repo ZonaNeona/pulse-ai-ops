@@ -31,6 +31,48 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_usage (
+    id TEXT PRIMARY KEY,
+    day TEXT NOT NULL,
+    hour INTEGER NOT NULL,
+    visitor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    estimated_usd REAL NOT NULL,
+    actual_usd REAL,
+    status TEXT NOT NULL,
+    details TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_usage_day ON ai_usage(day);
+CREATE INDEX IF NOT EXISTS ai_usage_visitor ON ai_usage(day, visitor_id);
+CREATE TABLE IF NOT EXISTS ai_traces (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    question TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    model TEXT NOT NULL,
+    total_ms INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    tokens INTEGER NOT NULL,
+    steps_json TEXT NOT NULL,
+    answer_text TEXT NOT NULL,
+    sources_json TEXT NOT NULL,
+    drafts_json TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_traces_created ON ai_traces(created_at);
+CREATE TABLE IF NOT EXISTS ai_drafts (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai_drafts_session ON ai_drafts(session_id);
+
 """
 
 

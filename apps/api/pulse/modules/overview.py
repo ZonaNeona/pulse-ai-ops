@@ -110,9 +110,9 @@ def overview(data: Data) -> dict[str, Any]:
         {
             "id": "agents",
             "title": "Агенты",
-            "status": "neutral",
-            "headline": "Скоро",
-            "detail": "Hermes Agent: инструменты, подагенты, трассировка",
+            "status": "success",
+            "headline": "В бюджете",
+            "detail": "Hermes Agent: MCP-инструменты, трассировка",
             "href": "/under-the-hood",
         },
     ]

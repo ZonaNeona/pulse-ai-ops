@@ -93,8 +93,8 @@ export function UnderTheHood() {
         ) : (
           <>
             <CardHeader
-              title="Трассировка хода агента · пример"
-              hint={`«${run.question}» — живая трассировка появится с подключением Hermes Agent`}
+              title="Трассировка хода агента"
+              hint={`«${run.question}» — живой запуск (${run.engine === 'hermes' ? 'Hermes Agent' : 'резервный цикл'})`}
               action={
                 <div className="hidden items-center gap-1.5 sm:flex">
                   <Badge tone="accent">{run.engine === 'hermes' ? 'Hermes Agent' : 'Резервный цикл'}</Badge>

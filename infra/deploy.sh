@@ -31,17 +31,35 @@ systemctl enable pulse-api.service
 systemctl enable pulse-reset.timer
 
 echo "==> [4/6] Configuring Nginx and SSL"
-cp "$DEST/infra/nginx/demo.shvarev-demo.ru.conf" /etc/nginx/sites-available/demo.shvarev-demo.ru
-ln -sf /etc/nginx/sites-available/demo.shvarev-demo.ru /etc/nginx/sites-enabled/demo.shvarev-demo.ru
-
-# If certificate does not exist yet, issue it via certbot
+# If certificate does not exist yet, issue it via certbot using HTTP challenge first
 if [ ! -d "/etc/letsencrypt/live/demo.shvarev-demo.ru" ]; then
-    echo "Issuing Let's Encrypt certificate for demo.shvarev-demo.ru..."
-    # Temporarily allow http-only challenge verification
-    nginx -t && systemctl reload nginx
-    certbot certonly --nginx -d demo.shvarev-demo.ru --non-interactive --agree-tos --register-unsafely-without-email
+    echo "Creating temporary HTTP-only config for certbot challenge..."
+    mkdir -p /var/www/html/.well-known/acme-challenge
+    cat <<'EOF' > /etc/nginx/sites-available/demo.shvarev-demo.ru
+server {
+    listen 80;
+    listen [::]:80;
+    server_name demo.shvarev-demo.ru;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        try_files $uri =404;
+    }
+    location / {
+        return 200 "Pulse ACME challenge in progress\n";
+    }
+}
+EOF
+    ln -sf /etc/nginx/sites-available/demo.shvarev-demo.ru /etc/nginx/sites-enabled/demo.shvarev-demo.ru
+    nginx -t
+    systemctl reload nginx
+
+    echo "Requesting Let's Encrypt certificate..."
+    certbot certonly --webroot -w /var/www/html -d demo.shvarev-demo.ru --non-interactive --agree-tos
 fi
 
+# Install full HTTPS config
+cp "$DEST/infra/nginx/demo.shvarev-demo.ru.conf" /etc/nginx/sites-available/demo.shvarev-demo.ru
+ln -sf /etc/nginx/sites-available/demo.shvarev-demo.ru /etc/nginx/sites-enabled/demo.shvarev-demo.ru
 nginx -t
 systemctl reload nginx
 

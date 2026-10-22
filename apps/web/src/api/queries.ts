@@ -59,5 +59,5 @@ export const useBudget = () => useData<Budget>('budget', () => api('/budget'), L
 export const useDocs = () => useData<DocItem[]>('docs', local(demo.DOCS))
 export const useKbStats = () => useData<KbStats>('kb-stats', local(demo.KB_STATS))
 export const useKbAnswer = () => useData<KbAnswer>('kb-answer', local(demo.KB_ANSWER))
-export const useLastTrace = () => useData<TraceRun>('trace', local(demo.TRACE))
+export const useLastTrace = () => useData<TraceRun>('trace', () => api('/trace/latest'), LIVE)
 export const useChat = () => useData<ChatMessage[]>('chat', local(demo.CHAT))

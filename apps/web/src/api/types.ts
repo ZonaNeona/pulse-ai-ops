@@ -263,6 +263,16 @@ export interface TraceRun {
   steps: TraceStep[]
 }
 
+export interface ChatDraft {
+  draft_id: string
+  status: 'pending_confirmation' | 'confirmed' | 'undone'
+  action: string
+  title: string
+  responsible: string
+  deadline?: string
+  note?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -270,6 +280,7 @@ export interface ChatMessage {
   sources?: { label: string; href: string }[]
   trace?: TraceRun
   cached?: boolean
+  draft?: ChatDraft
 }
 
 export interface Budget {
