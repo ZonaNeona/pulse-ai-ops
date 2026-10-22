@@ -49,7 +49,7 @@ def supplier_checks(doc: Doc, data: Data, others: list[Doc]) -> list[Check]:
             Check(
                 "ИНН совпадает с карточкой 1С",
                 False,
-                f"в документе {inn}, в 1С у «{cp.name}» — {cp.inn}",
+                f"в документе {inn}, в 1С у {cp.name} — {cp.inn}",
                 "Работа с первичными документами поставщиков, § 1.3",
             )
         )
@@ -133,7 +133,7 @@ def contract_checks(doc: Doc, data: Data) -> list[Check]:
         (c for c in data.companies.values() if norm(c.title) == name or (name and name in norm(c.title))), None
     )
     if company is None:
-        checks.append(Check("Заказчик есть в CRM", False, f"«{doc.value('counterparty')}» не найден в компаниях"))
+        checks.append(Check("Заказчик есть в CRM", False, f"{doc.value('counterparty')} не найден в компаниях"))
         return checks
     checks.append(Check("Заказчик есть в CRM", True, company.title))
     total = doc.amount

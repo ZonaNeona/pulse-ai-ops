@@ -20,8 +20,12 @@ mkdir -p "$DEST/apps/api" "$DEST/apps/web" "$DEST/var" /etc/pulse
 [ -f "$ENV_FILE" ] || install -m 600 "$STAGE/.env.example" "$ENV_FILE"
 
 echo "==> replace code (var/, .venv and secrets stay)"
-rm -rf "$DEST/apps/web/dist" "$DEST/apps/api/pulse" "$DEST/hermes" "$DEST/infra"
-cp -a "$STAGE/apps/web/dist" "$DEST/apps/web/dist"
+rm -rf "$DEST/apps/api/pulse" "$DEST/hermes" "$DEST/infra"
+# Hashed chunks of the previous releases stay a week: a tab opened before the release still loads its screens.
+mkdir -p "$DEST/apps/web/dist/assets"
+cp -a "$STAGE/apps/web/dist/assets/." "$DEST/apps/web/dist/assets/"
+find "$DEST/apps/web/dist/assets" -type f -mtime +7 -delete
+find "$STAGE/apps/web/dist" -maxdepth 1 -type f -exec cp -a {} "$DEST/apps/web/dist/" \;
 cp -a "$STAGE/apps/api/pulse" "$DEST/apps/api/pulse"
 cp -a "$STAGE/apps/api/pyproject.toml" "$DEST/apps/api/pyproject.toml"
 cp -a "$STAGE/hermes" "$STAGE/infra" "$DEST/"

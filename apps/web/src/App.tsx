@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 import { Shell } from '@/app/Shell'
 import { navigate, useRoute } from '@/app/router'
 import { updateBackButton } from '@/app/telegram'
@@ -6,16 +6,63 @@ import { Overview } from '@/screens/Overview'
 import { Empty, Skeleton } from '@/ui/kit'
 
 // The overview is the landing screen and ships in the main chunk; the rest load on first visit.
-const Sales = lazy(() => import('@/screens/Sales').then((m) => ({ default: m.Sales })))
-const Documents = lazy(() => import('@/screens/Documents').then((m) => ({ default: m.Documents })))
-const Knowledge = lazy(() => import('@/screens/Knowledge').then((m) => ({ default: m.Knowledge })))
-const Integrations = lazy(() => import('@/screens/Integrations').then((m) => ({ default: m.Integrations })))
-const Copilot = lazy(() => import('@/screens/Copilot').then((m) => ({ default: m.Copilot })))
-const UnderTheHood = lazy(() => import('@/screens/UnderTheHood').then((m) => ({ default: m.UnderTheHood })))
-const HowWeWork = lazy(() => import('@/screens/HowWeWork').then((m) => ({ default: m.HowWeWork })))
-const Roadmap = lazy(() => import('@/screens/Roadmap').then((m) => ({ default: m.Roadmap })))
-const Quality = lazy(() => import('@/screens/Quality').then((m) => ({ default: m.QualityScreen })))
-const DesignSystem = lazy(() => import('@/screens/DesignSystem').then((m) => ({ default: m.DesignSystem })))
+// A tab opened before a release asks for chunks the new release no longer has: reload once to get the new ones.
+function screen<T>(load: () => Promise<T>, pick: (m: T) => ComponentType) {
+  return lazy(() =>
+    load()
+      .then((m) => {
+        sessionStorage.removeItem('pulse-reloaded')
+        return { default: pick(m) }
+      })
+      .catch((err: unknown) => {
+        if (!sessionStorage.getItem('pulse-reloaded')) {
+          sessionStorage.setItem('pulse-reloaded', '1')
+          location.reload()
+        }
+        throw err
+      }),
+  )
+}
+const Sales = screen(
+  () => import('@/screens/Sales'),
+  (m) => m.Sales,
+)
+const Documents = screen(
+  () => import('@/screens/Documents'),
+  (m) => m.Documents,
+)
+const Knowledge = screen(
+  () => import('@/screens/Knowledge'),
+  (m) => m.Knowledge,
+)
+const Integrations = screen(
+  () => import('@/screens/Integrations'),
+  (m) => m.Integrations,
+)
+const Copilot = screen(
+  () => import('@/screens/Copilot'),
+  (m) => m.Copilot,
+)
+const UnderTheHood = screen(
+  () => import('@/screens/UnderTheHood'),
+  (m) => m.UnderTheHood,
+)
+const HowWeWork = screen(
+  () => import('@/screens/HowWeWork'),
+  (m) => m.HowWeWork,
+)
+const Roadmap = screen(
+  () => import('@/screens/Roadmap'),
+  (m) => m.Roadmap,
+)
+const Quality = screen(
+  () => import('@/screens/Quality'),
+  (m) => m.QualityScreen,
+)
+const DesignSystem = screen(
+  () => import('@/screens/DesignSystem'),
+  (m) => m.DesignSystem,
+)
 
 function Screen({ path }: { path: string }) {
   if (path === '/') return <Overview />
