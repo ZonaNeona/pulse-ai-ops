@@ -12,9 +12,9 @@ import { Badge, Button, Card, PageHeader, type Tone } from '@/ui/kit'
 import { TraceTimeline } from '@/ui/Trace'
 
 const ENGINE: Record<Engine, { label: string; tone: Tone }> = {
-  rules: { label: 'Готовый ответ из инструментов · без модели', tone: 'neutral' },
+  rules: { label: 'Резервный ответ из данных', tone: 'neutral' },
   kb: { label: 'Ответ по регламентам', tone: 'info' },
-  model: { label: 'Модель с инструментами', tone: 'accent' },
+  model: { label: 'ИИ-агент с инструментами', tone: 'accent' },
   hermes: { label: 'Hermes Agent', tone: 'accent' },
   none: { label: 'Модель недоступна', tone: 'warning' },
 }
@@ -24,8 +24,8 @@ const INTRO: ChatMessage = {
   role: 'assistant',
   text:
     'Я отвечаю по данным стенда: CRM, 1С, входящие документы и регламенты компании. ' +
-    'Частые вопросы — кнопки внизу — считаются сразу из инструментов, без модели. ' +
-    'Свободный вопрос разбирает агент: сам выбирает инструменты, а под ответом виден его ход.',
+    'Нажмите любой вопрос внизу или спросите своими словами — агент сам подберёт нужные инструменты ' +
+    'и покажет цепочку рассуждений под ответом.',
 }
 
 /** Minimal markdown: **bold**, _italic_ notes and line breaks — no HTML from the model reaches the page. */

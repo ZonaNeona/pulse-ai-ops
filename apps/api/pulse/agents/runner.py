@@ -110,27 +110,34 @@ async def _answer(question: str, visitor: Visitor, trace: Trace) -> tuple[str, l
     with trace.step("route", "router", "Маршрутизация вопроса", "Маршрутизатор") as info:
         handler = quick.match(question)
         rules = handler is None and bool(RULES.search(question.lower()))
-        info["detail"] = "готовый вопрос" if handler else "регламенты" if rules else "свободный вопрос"
+        info["detail"] = "быстрый сценарий" if handler else "регламенты" if rules else "свободный вопрос"
+
+    # If the model is available (in production), EVERY question is resolved by the AI Agent with tools!
+    if llm.available():
+        if hermes.configured():
+            try:
+                return await _hermes(question, visitor, trace)
+            except hermes.HermesUnavailable as exc:
+                trace.add(
+                    "llm",
+                    "hermes",
+                    "Hermes недоступен — отвечает встроенный цикл",
+                    "Hermes",
+                    trace.elapsed(),
+                    0.1,
+                    str(exc),
+                )
+        return await _loop(question, visitor, trace)
+
+    # Fallback ONLY when no model is available (unit tests or budget exhausted):
     if handler:
         trace.engine = "rules"
         reply = await handler(trace, question)
         return reply.text, reply.sources
     if rules:
         return await _knowledge(question, visitor, trace)
-    if hermes.configured() and llm.available():
-        try:
-            return await _hermes(question, visitor, trace)
-        except hermes.HermesUnavailable as exc:
-            trace.add(
-                "llm",
-                "hermes",
-                "Hermes недоступен — отвечает встроенный цикл",
-                "Hermes",
-                trace.elapsed(),
-                0.1,
-                str(exc),
-            )
-    return await _loop(question, visitor, trace)
+    trace.engine = "none"
+    return WITHOUT_MODEL.format(reason="модель не подключена"), []
 
 
 async def _knowledge(question: str, visitor: Visitor, trace: Trace) -> tuple[str, list[dict[str, str]]]:
