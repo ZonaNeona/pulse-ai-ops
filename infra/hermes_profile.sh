@@ -9,7 +9,8 @@ P=$H/profiles/pulse
 HB=/home/hermes/.local/bin/hermes
 ENV_FILE=/etc/pulse/pulse.env
 PORT=8663
-MODEL=${PULSE_HERMES_MODEL:-deepseek/deepseek-chat}
+MODEL=${PULSE_HERMES_MODEL:-$(grep -E "^LLM_MODEL=" /etc/pulse/pulse.env | cut -d= -f2-)}
+MODEL=${MODEL:-anthropic/claude-haiku-5.5}
 
 KEY_LLM=$(grep -E '^LLM_API_KEY=' "$ENV_FILE" | cut -d= -f2-)
 BASE=$(grep -E '^LLM_BASE_URL=' "$ENV_FILE" | cut -d= -f2-)

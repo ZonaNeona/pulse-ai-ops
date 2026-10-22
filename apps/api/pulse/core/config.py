@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_api_key: str = ""
-    llm_model: str = "deepseek/deepseek-chat"
+    llm_model: str = "anthropic/claude-haiku-5.5"
     llm_vision_model: str = "google/gemini-2.5-flash-lite"
 
     ai_daily_usd: float = 1.5

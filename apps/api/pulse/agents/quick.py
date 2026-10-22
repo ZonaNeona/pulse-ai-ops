@@ -194,4 +194,6 @@ def match(question: str) -> Handler | None:
     q = question.lower().replace("ё", "е")
     if SPECIFIC.search(q) or any(stem in q for stem in _names()):
         return None
-    return next((h for p, h in INTENTS if p.search(q)), None)
+    found = {h for p, h in INTENTS if p.search(q)}
+    # Two topics in one question («сравни оплаты и покажи документы») — a single canned answer would drop half.
+    return found.pop() if len(found) == 1 else None

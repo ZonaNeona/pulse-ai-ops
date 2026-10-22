@@ -225,7 +225,7 @@ function Architecture() {
         <Box title="Битрикс24 REST" sub="CRM_MODE=live" tone="muted" />
         <Box title="Эмулятор 1С" sub="OData-формат" />
         <Box title="1С OData" sub="ERP_MODE=live" tone="muted" />
-        <Box title="OpenRouter" sub="DeepSeek · Gemini" />
+        <Box title="OpenRouter" sub="Claude Haiku · Gemini" />
       </Layer>
     </div>
   )

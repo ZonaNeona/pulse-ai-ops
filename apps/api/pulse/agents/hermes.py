@@ -13,9 +13,11 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
+from pulse.agents import tools
 from pulse.agents.trace import Trace
 from pulse.core.config import get_settings
 
@@ -94,6 +96,22 @@ async def _turn(question: str, session: str, trace: Trace) -> HermesResult:
         raise HermesUnavailable("Hermes не ответил") from None
 
 
+def _summary(preview: str) -> str:
+    """Hermes previews a tool result as MCP text ({"result": "<json>"}); the trace shows «6 записей», not raw JSON."""
+    value: Any = preview
+    for _ in range(2):  # the payload may be JSON inside a JSON string
+        if isinstance(value, dict) and "result" in value:
+            value = value["result"]
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                break
+    if isinstance(value, str):
+        return "ответ получен" if value.lstrip().startswith(("[", "{")) else value[:80]
+    return tools.brief(value)
+
+
 async def _events(run_id: str, trace: Trace) -> HermesResult:
     open_tools: dict[str, float] = {}
     used: list[str] = []
@@ -115,7 +133,7 @@ async def _events(run_id: str, trace: Trace) -> HermesResult:
                 used.append(name)
             elif kind == "tool.completed" and name:
                 began = open_tools.pop(name, trace.elapsed())
-                detail = "ошибка" if event.get("error") else str(event.get("preview") or "")[:120]
+                detail = "ошибка" if event.get("error") else _summary(str(event.get("preview") or ""))
                 trace.add("tool", name, name, "Инструменты (MCP)", began, trace.elapsed() - began, detail)
             elif kind and kind.startswith("subagent.") and kind.endswith(("complete", "completed")):
                 label = str(event.get("goal") or event.get("name") or "подагент")[:80]

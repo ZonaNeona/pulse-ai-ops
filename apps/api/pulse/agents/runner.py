@@ -167,6 +167,8 @@ async def _hermes(question: str, visitor: Visitor, trace: Trace) -> tuple[str, l
     except hermes.HermesUnavailable:
         budget.settle(reserve_id, 0.0, {"error": "hermes"})
         raise
+    if not res.cost_usd and res.model:
+        res.cost_usd = await llm.cost(res.model, res.prompt_tokens, res.completion_tokens)
     budget.settle(
         reserve_id,
         res.cost_usd,
@@ -188,8 +190,15 @@ async def _loop(question: str, visitor: Visitor, trace: Trace) -> tuple[str, lis
     used: list[str] = []
     for turn in range(MAX_TURNS):
         start = trace.elapsed()
+        last = turn == MAX_TURNS - 1  # the last round gets no tools: answer with what has been gathered
+        if last:
+            messages.append(
+                {"role": "user", "content": "Хватит вызывать инструменты — ответь по уже полученным данным."}
+            )
         try:
-            res = await llm.chat(messages, visitor=visitor.quota, tools=tools.specs(), reserve=turn == 0)
+            res = await llm.chat(
+                messages, visitor=visitor.quota, tools=None if last else tools.specs(), reserve=turn == 0
+            )
         except llm.LlmUnavailable as exc:
             if turn == 0:
                 trace.engine = "none"

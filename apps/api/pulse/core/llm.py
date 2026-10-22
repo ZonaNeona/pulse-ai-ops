@@ -44,6 +44,27 @@ class LlmResult:
 _transport: httpx.AsyncBaseTransport | None = None  # tests plug a mock transport in here
 
 
+_prices: dict[str, tuple[float, float]] = {}
+
+
+async def cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Cost of a call whose provider did not report it (Hermes runs), from the provider's price list."""
+    s = get_settings()
+    if not _prices and s.llm_api_key:
+        try:
+            async with httpx.AsyncClient(timeout=20, transport=_transport) as client:
+                resp = await client.get(
+                    s.llm_base_url.rstrip("/") + "/models", headers={"Authorization": f"Bearer {s.llm_api_key}"}
+                )
+                for m in resp.json().get("data", []):
+                    p = m.get("pricing") or {}
+                    _prices[m["id"]] = (float(p.get("prompt") or 0), float(p.get("completion") or 0))
+        except (httpx.HTTPError, ValueError, KeyError):
+            return 0.0
+    prompt, completion = _prices.get(model, (0.0, 0.0))
+    return prompt * prompt_tokens + completion * completion_tokens
+
+
 def available() -> bool:
     return bool(get_settings().llm_api_key)
 

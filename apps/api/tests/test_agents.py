@@ -36,6 +36,7 @@ async def test_quick_answers_only_clear_intents(ready: None) -> None:
     assert all(quick.match(q) for q in PRESETS)
     assert quick.match("Какие сделки зависли у Кузнецовой?") is None, "a narrowed question is the agent's job"
     assert quick.match("Почему зависли сделки?") is None
+    assert quick.match("Сравни оплаты с 1С и какие документы ждут решения") is None, "two topics go to the agent"
     assert quick.match("Что посоветуешь сделать с Медиусом?") is None
     assert quick.match("Напиши стих про весну") is None
 
