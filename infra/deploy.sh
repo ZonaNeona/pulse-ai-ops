@@ -1,78 +1,61 @@
 #!/usr/bin/env bash
-# Deploy / update Pulse AI Ops on 159.194.250.138 (demo.shvarev-demo.ru)
+# Install a release built by `python tools/release.py` on the server (demo.shvarev-demo.ru).
+#
+#   scp pulse-release.tar.gz infra/deploy.sh root@server:/tmp/
+#   ssh root@server 'bash /tmp/deploy.sh /tmp/pulse-release.tar.gz'
+#
+# Keeps what lives between releases: /etc/pulse/pulse.env (secrets), /opt/pulse/var (SQLite, LangGraph
+# checkpoints) and the virtualenv. Code is owned by root and read-only for the service user.
 set -euo pipefail
 
-DEST="/opt/pulse"
-ENV_FILE="/etc/pulse/pulse.env"
+ARCHIVE=${1:-/tmp/pulse-release.tar.gz}
+DEST=/opt/pulse
+ENV_FILE=/etc/pulse/pulse.env
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
 
-echo "==> [1/6] Ensuring base directories and permissions"
-mkdir -p "$DEST" "/etc/pulse" "$DEST/var"
+echo "==> unpack"
+tar -xzf "$ARCHIVE" -C "$STAGE"
+mkdir -p "$DEST/apps/api" "$DEST/apps/web" "$DEST/var" /etc/pulse
+[ -f "$ENV_FILE" ] || install -m 600 "$STAGE/.env.example" "$ENV_FILE"
+
+echo "==> replace code (var/, .venv and secrets stay)"
+rm -rf "$DEST/apps/web/dist" "$DEST/apps/api/pulse" "$DEST/hermes" "$DEST/infra"
+cp -a "$STAGE/apps/web/dist" "$DEST/apps/web/dist"
+cp -a "$STAGE/apps/api/pulse" "$DEST/apps/api/pulse"
+cp -a "$STAGE/apps/api/pyproject.toml" "$DEST/apps/api/pyproject.toml"
+cp -a "$STAGE/hermes" "$STAGE/infra" "$DEST/"
+cp -a "$STAGE/.env.example" "$STAGE/README.md" "$STAGE/LICENSE" "$DEST/"
+
+echo "==> permissions"
+chown -R root:root "$DEST/apps" "$DEST/hermes" "$DEST/infra" "$DEST/.env.example" "$DEST/README.md" "$DEST/LICENSE"
+find "$DEST/apps" "$DEST/hermes" "$DEST/infra" -type d -exec chmod 755 {} +
+find "$DEST/apps" "$DEST/hermes" "$DEST/infra" -type f -not -path "*/.venv/*" -exec chmod 644 {} +
+chmod 755 "$DEST"/infra/*.sh
+chmod 644 "$DEST/.env.example" "$DEST/README.md" "$DEST/LICENSE"
 chown -R www-data:www-data "$DEST/var"
+chmod 600 "$ENV_FILE"
 
-if [ ! -f "$ENV_FILE" ]; then
-    echo "Creating initial $ENV_FILE from .env.example"
-    cp "$DEST/.env.example" "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
-fi
+echo "==> python dependencies"
+[ -d "$DEST/apps/api/.venv" ] || python3 -m venv "$DEST/apps/api/.venv"
+"$DEST/apps/api/.venv/bin/pip" install -q -e "$DEST/apps/api"
 
-echo "==> [2/6] Setting up Python 3.12 virtualenv"
-if [ ! -d "$DEST/apps/api/.venv" ]; then
-    python3 -m venv "$DEST/apps/api/.venv"
-fi
-"$DEST/apps/api/.venv/bin/pip" install --upgrade pip
-"$DEST/apps/api/.venv/bin/pip" install -e "$DEST/apps/api"
-
-echo "==> [3/6] Installing systemd units"
-cp "$DEST/infra/systemd/pulse-api.service" /etc/systemd/system/pulse-api.service
-cp "$DEST/infra/systemd/pulse-reset.service" /etc/systemd/system/pulse-reset.service
-cp "$DEST/infra/systemd/pulse-reset.timer" /etc/systemd/system/pulse-reset.timer
+echo "==> systemd and nginx"
+install -m 644 "$DEST"/infra/systemd/pulse-*.service "$DEST"/infra/systemd/pulse-*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable pulse-api.service
-systemctl enable pulse-reset.timer
-
-echo "==> [4/6] Configuring Nginx and SSL"
-# If certificate does not exist yet, issue it via certbot using HTTP challenge first
-if [ ! -d "/etc/letsencrypt/live/demo.shvarev-demo.ru" ]; then
-    echo "Creating temporary HTTP-only config for certbot challenge..."
-    mkdir -p /var/www/html/.well-known/acme-challenge
-    cat <<'EOF' > /etc/nginx/sites-available/demo.shvarev-demo.ru
-server {
-    listen 80;
-    listen [::]:80;
-    server_name demo.shvarev-demo.ru;
-    location ^~ /.well-known/acme-challenge/ {
-        root /var/www/html;
-        try_files $uri =404;
-    }
-    location / {
-        return 200 "Pulse ACME challenge in progress\n";
-    }
-}
-EOF
-    ln -sf /etc/nginx/sites-available/demo.shvarev-demo.ru /etc/nginx/sites-enabled/demo.shvarev-demo.ru
-    nginx -t
-    systemctl reload nginx
-
-    echo "Requesting Let's Encrypt certificate..."
-    certbot certonly --webroot -w /var/www/html -d demo.shvarev-demo.ru --non-interactive --agree-tos
-fi
-
-# Install full HTTPS config
-cp "$DEST/infra/nginx/demo.shvarev-demo.ru.conf" /etc/nginx/sites-available/demo.shvarev-demo.ru
+systemctl enable -q pulse-api.service pulse-reset.timer
+install -m 644 "$DEST/infra/nginx/demo.shvarev-demo.ru.conf" /etc/nginx/sites-available/demo.shvarev-demo.ru
 ln -sf /etc/nginx/sites-available/demo.shvarev-demo.ru /etc/nginx/sites-enabled/demo.shvarev-demo.ru
-nginx -t
-systemctl reload nginx
+nginx -t -q && systemctl reload nginx
 
-echo "==> [5/6] Restarting Pulse API"
+echo "==> restart and check"
 systemctl restart pulse-api.service
 systemctl restart pulse-reset.timer
-
-echo "==> [6/6] Verifying health check"
-sleep 2
-curl -fsS http://127.0.0.1:8010/api/health || {
-    echo "Health check failed! Journal logs:"
-    journalctl -u pulse-api -n 25 --no-pager
-    exit 1
-}
-
-echo "Pulse AI Ops successfully deployed and running at https://demo.shvarev-demo.ru"
+for _ in $(seq 1 60); do
+    curl -fsS http://127.0.0.1:8010/api/health >/dev/null 2>&1 && break
+    sleep 2
+done
+curl -fsS http://127.0.0.1:8010/api/health || { journalctl -u pulse-api -n 40 --no-pager; exit 1; }
+echo
+curl -fsS -o /dev/null -w "overview %{http_code}\n" http://127.0.0.1:8010/api/overview
+echo "deployed: $(python3 -c 'import json;print(json.load(open("/opt/pulse/apps/api/pulse/quality.json"))["commit"])')"

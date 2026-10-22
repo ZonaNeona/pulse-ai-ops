@@ -56,6 +56,13 @@ async def test_documents_preset_sees_this_visitors_queue(ready: None) -> None:
     assert "№ 2417" in answer["text"] and "+9 000" in answer["text"]
 
 
+async def test_presets_stay_free_when_the_model_is_connected(ready: None, model: Script) -> None:
+    for question in PRESETS:
+        assert (await runner.ask(question, ME))["engine"] == "rules"
+    assert not model.requests, "a frequent question must not spend the visitor's model quota"
+    assert budget.summary(ME.quota)["questionsLeft"] == 10
+
+
 async def test_rules_question_goes_to_the_knowledge_base(ready: None) -> None:
     answer = await runner.ask("Какая скидка допустима для дилера?", ME)
     assert answer["engine"] == "kb"
