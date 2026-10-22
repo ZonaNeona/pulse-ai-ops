@@ -180,6 +180,17 @@ def tool_undo_draft(draft_id: str) -> dict[str, Any]:
     return {"status": "undone", "draft_id": draft_id}
 
 
+def get_drafts(session_id: str) -> list[dict[str, Any]]:
+    """Returns all drafts for a session ordered by creation time."""
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, kind, title, payload, status, created_at, updated_at "
+            "FROM ai_drafts WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def tool_docs_queue() -> list[dict[str, Any]]:
     """Returns incoming documents that require human review or confirmation."""
     items = docs_mod.list_docs()

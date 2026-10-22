@@ -31,10 +31,14 @@ KINDS = (
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await sync.ensure_ready()
     worker = asyncio.create_task(sync.loop())
+    from pulse import bot as bot_mod
+
+    bot_task = asyncio.create_task(bot_mod.setup_webhook())
     try:
         yield
     finally:
         worker.cancel()
+        bot_task.cancel()
 
 
 app = FastAPI(

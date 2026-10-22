@@ -1,6 +1,7 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Shell } from '@/app/Shell'
-import { useRoute } from '@/app/router'
+import { navigate, useRoute } from '@/app/router'
+import { updateBackButton } from '@/app/telegram'
 import { Overview } from '@/screens/Overview'
 import { Empty, Skeleton } from '@/ui/kit'
 
@@ -36,6 +37,11 @@ function Loading() {
 
 export default function App() {
   const { path } = useRoute()
+
+  useEffect(() => {
+    updateBackButton(path !== '/', () => navigate('/'))
+  }, [path])
+
   return (
     <Shell>
       <Suspense fallback={<Loading />}>

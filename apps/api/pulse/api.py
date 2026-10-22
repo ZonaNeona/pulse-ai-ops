@@ -6,9 +6,10 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from pulse import bot as bot_mod
 from pulse import data
 from pulse.agents import cache, runner, tools
-from pulse.core import budget, db
+from pulse.core import budget, config, db
 from pulse.modules import docs as docs_mod
 from pulse.modules import integrations, overview
 from pulse.modules import knowledge as kb_mod
@@ -308,5 +309,38 @@ def get_kb_documents() -> list[dict[str, Any]]:
 def get_kb_eval() -> dict[str, Any]:
     """Runs or returns the golden evaluation benchmark suite for RAG faithfulness and refusals."""
     return kb_mod.run_eval()
+
+
+# --- Telegram Bot & Mini App -------------------------------------------------
+
+
+class ValidateInitDataRequest(BaseModel):
+    init_data: str
+
+
+@router.get("/bot/status")
+def get_bot_status() -> dict[str, Any]:
+    """Returns Telegram bot readiness, commands and Mini App launch URL."""
+    return bot_mod.get_status()
+
+
+@router.post("/bot/webhook")
+async def post_bot_webhook(request: Request) -> dict[str, Any]:
+    """Receives Telegram webhook updates and dispatches them to aiogram."""
+    try:
+        body = await request.json()
+        await bot_mod.feed_update(body)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+@router.post("/bot/validate_init_data")
+def post_validate_init_data(req: ValidateInitDataRequest) -> dict[str, Any]:
+    """Validates Telegram WebApp initData HMAC-SHA256 signature."""
+    s = config.get_settings()
+    is_valid = bot_mod.validate_init_data(req.init_data, s.telegram_bot_token)
+    return {"valid": is_valid}
+
 
 
