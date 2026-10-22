@@ -51,6 +51,8 @@ nginx -t -q && systemctl reload nginx
 echo "==> restart and check"
 systemctl restart pulse-api.service
 systemctl restart pulse-reset.timer
+# Hermes keeps its MCP server process alive between turns: restart it so it runs the new tool code.
+if systemctl is-enabled -q pulse-hermes.service 2>/dev/null; then systemctl restart pulse-hermes.service; fi
 for _ in $(seq 1 60); do
     curl -fsS http://127.0.0.1:8010/api/health >/dev/null 2>&1 && break
     sleep 2
