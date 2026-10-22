@@ -230,7 +230,7 @@ export const RELEASES: Release[] = [
             outcome: 'Граф останавливается на спорном документе и продолжает после решения.',
             from: '2026-10-22',
             min: 180,
-            status: 'done',
+            status: 'verified',
             check: { label: 'Документы', href: '#/docs' },
           },
           {
@@ -239,7 +239,7 @@ export const RELEASES: Release[] = [
             outcome: 'Видно не только что не так, но и какой пункт регламента нарушен.',
             from: '2026-10-22',
             min: 120,
-            status: 'done',
+            status: 'verified',
             check: { label: 'checks.py', href: GH + 'apps/api/pulse/modules/docs/checks.py' },
           },
           {
@@ -248,7 +248,7 @@ export const RELEASES: Release[] = [
             outcome: 'Заказчик проверяет систему на своём документе.',
             from: '2026-10-22',
             min: 90,
-            status: 'done',
+            status: 'verified',
             check: { label: 'Загрузить файл', href: '#/docs' },
           },
         ],
@@ -263,7 +263,7 @@ export const RELEASES: Release[] = [
             outcome: 'Находится нужный пункт, даже если вопрос сформулирован иначе.',
             from: '2026-10-22',
             min: 150,
-            status: 'done',
+            status: 'verified',
             check: { label: 'Знания', href: '#/knowledge' },
           },
           {
@@ -272,7 +272,7 @@ export const RELEASES: Release[] = [
             outcome: 'Модель не может сослаться на то, чего ей не давали.',
             from: '2026-10-22',
             min: 90,
-            status: 'done',
+            status: 'verified',
           },
           {
             code: 'ЗН-03',
@@ -280,7 +280,7 @@ export const RELEASES: Release[] = [
             outcome: 'Качество поиска измерено, а не обещано.',
             from: '2026-10-22',
             min: 60,
-            status: 'done',
+            status: 'verified',
             check: { label: 'eval.py', href: GH + 'apps/api/pulse/modules/knowledge/eval.py' },
           },
         ],
@@ -295,7 +295,7 @@ export const RELEASES: Release[] = [
             outcome: 'Один набор инструментов для всех каналов — нечему расходиться.',
             from: '2026-10-22',
             min: 150,
-            status: 'done',
+            status: 'verified',
             check: { label: 'tools.py', href: GH + 'apps/api/pulse/agents/tools.py' },
           },
           {
@@ -304,7 +304,7 @@ export const RELEASES: Release[] = [
             outcome: 'Частые вопросы бесплатны и отвечают сразу.',
             from: '2026-10-22',
             min: 90,
-            status: 'done',
+            status: 'verified',
             check: { label: 'Копилот', href: '#/copilot' },
           },
           {
@@ -313,7 +313,7 @@ export const RELEASES: Release[] = [
             outcome: 'Видно, что делал агент и сколько это стоило.',
             from: '2026-10-22',
             min: 90,
-            status: 'done',
+            status: 'verified',
             check: { label: 'Под капотом', href: '#/under-the-hood' },
           },
           {
@@ -322,7 +322,7 @@ export const RELEASES: Release[] = [
             outcome: 'Расходы на модели не выходят за потолок.',
             from: '2026-10-22',
             min: 60,
-            status: 'done',
+            status: 'verified',
           },
           {
             code: 'Р-3.К',
@@ -330,7 +330,7 @@ export const RELEASES: Release[] = [
             outcome: 'На стенде нет заранее написанных результатов.',
             from: '2026-10-22',
             min: 120,
-            status: 'done',
+            status: 'verified',
             control: true,
           },
         ],
@@ -374,9 +374,9 @@ export const RELEASES: Release[] = [
             title: 'Ключ модели с дневным лимитом и профиль Hermes на сервере',
             outcome: 'Свободные вопросы и загрузка фото работают на стенде.',
             from: '2026-10-22',
-            to: '2026-10-23',
             min: 120,
-            status: 'planned',
+            status: 'verified',
+            check: { label: 'Копилот', href: '#/copilot' },
           },
           {
             code: 'ЗАП-02',
@@ -384,7 +384,7 @@ export const RELEASES: Release[] = [
             outcome: 'Заказчик видит, как будет вестись его проект.',
             from: '2026-10-22',
             min: 240,
-            status: 'done',
+            status: 'verified',
             check: { label: 'Путь заказчика', href: '#/work' },
           },
           {
@@ -440,6 +440,11 @@ export const JOURNAL: JournalEntry[] = [
     date: '2026-10-22',
     title: 'Ревью ИИ-модулей',
     text: 'Документы, знания и агенты переведены на живые данные: каждый результат на экране считается при открытии, а стоимость берётся у провайдера модели.',
+  },
+  {
+    date: '2026-10-22',
+    title: 'Модель и Hermes на сервере',
+    text: 'Свободные вопросы отвечает Hermes Agent с инструментами стенда через MCP; модель выбрана замером на одном вопросе: claude-haiku-5.5 — 10 с и $0,002 против 23 с и $0,004 у прежней.',
   },
 ]
 

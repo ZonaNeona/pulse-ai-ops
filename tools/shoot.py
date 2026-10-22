@@ -20,6 +20,9 @@ ROUTES = {
     "integrations": "/integrations",
     "copilot": "/copilot",
     "under-the-hood": "/under-the-hood",
+    "work": "/work",
+    "roadmap": "/work/roadmap",
+    "quality": "/work/quality",
     "design": "/design",
 }
 WIDTHS = {"desktop": (1440, 900), "tablet": (768, 1024), "mobile": (390, 844)}

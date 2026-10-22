@@ -98,6 +98,23 @@ async def test_uploaded_document_is_read_by_the_model_when_connected(ready: None
     assert model.requests[0]["response_format"] == {"type": "json_object"}
 
 
+async def test_our_own_company_is_never_taken_for_the_counterparty(ready: None, model: Script) -> None:
+    fields = {
+        "kind": "invoice",
+        "fields": {
+            "number": {"value": "615", "confidence": 1},
+            "date": {"value": "21.10.2026", "confidence": 1},
+            "counterparty": {"value": "ООО «Норд Инжиниринг»", "confidence": 1},
+            "inn": {"value": "7802654321", "confidence": 1},
+            "total": {"value": "410000", "confidence": 1},
+        },
+    }
+    model.append(reply(json.dumps(fields, ensure_ascii=False)))
+    doc = await docs.upload("s1", "q1", "schet.txt", INVOICE.encode())
+    assert doc.value("counterparty") == "не найдено" and doc.value("inn") == ""
+    assert doc.status == "review"
+
+
 def test_unreadable_files_are_refused_with_a_reason() -> None:
     with pytest.raises(read.Unreadable):
         read.text_of("big.txt", b"x" * (read.MAX_BYTES + 1))

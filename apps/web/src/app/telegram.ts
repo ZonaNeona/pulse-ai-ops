@@ -114,10 +114,11 @@ export function updateBackButton(canGoBack: boolean, onBack: () => void) {
   }
 }
 
-/** Initializes the Telegram WebApp environment: expands to full screen, synchronizes theme and user session. */
+/** Inside Telegram: full screen and Telegram's colour scheme. The SDK script is present in every browser,
+ *  so only a real Mini App launch (non-empty initData) may touch the theme. */
 export function initTelegram() {
   const tg = getTelegramWebApp()
-  if (!tg) return
+  if (!tg || !isTelegramMiniApp()) return
 
   try {
     tg.ready()
@@ -132,17 +133,6 @@ export function initTelegram() {
     }
     syncTheme()
     tg.onEvent('themeChanged', syncTheme)
-
-    // 2. Synchronize user session: bind visitor ID to Telegram user ID for shared state
-    const user = tg.initDataUnsafe?.user
-    if (user?.id) {
-      const tgVisitorId = `tg_${user.id}`
-      try {
-        localStorage.setItem('pulse_visitor_id', tgVisitorId)
-      } catch {
-        // ignore
-      }
-    }
   } catch {
     // non-telegram browser fallback
   }

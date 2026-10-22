@@ -167,7 +167,7 @@ export function Copilot() {
               }}
               rows={1}
               maxLength={800}
-              placeholder="Например: что с зависшими сделками у Кузнецовой и что предложить?"
+              placeholder="Спросите своими словами…"
               className="max-h-40 min-h-9 flex-1 resize-none bg-transparent py-2 text-base outline-none placeholder:text-faint"
             />
             <button
@@ -269,7 +269,7 @@ function Message({ message }: { message: ChatMessage }) {
               </Badge>
             </div>
           )}
-          <div className="text-base leading-7 text-ink-2">{rich(message.text)}</div>
+          <div className="text-base leading-relaxed text-ink-2">{rich(message.text)}</div>
           {message.sources && message.sources.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">
               {message.sources.map((s) => (

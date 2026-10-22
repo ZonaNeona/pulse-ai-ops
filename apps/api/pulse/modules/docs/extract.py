@@ -75,7 +75,12 @@ def by_rules(text: str) -> Extracted:
     return Extracted(kind, fields, "rules")
 
 
-SCHEMA_PROMPT = """Ты извлекаешь реквизиты из входящего документа российской компании.
+OWN_NAME = "норд инжиниринг"  # we are the buyer on every incoming document; never the counterparty
+OWN_INN = "7802654321"
+
+SCHEMA_PROMPT = """Ты извлекаешь реквизиты из входящего документа компании ООО «Норд Инжиниринг» (ИНН 7802654321).
+«Норд Инжиниринг» — это мы: покупатель в счетах, УПД и актах, исполнитель в договорах. Нас в counterparty и inn
+не указывай никогда — там вторая сторона.
 Верни JSON с ключами:
 kind: "invoice" | "upd" | "act" | "contract" | "unknown";
 fields: объект, где для каждого найденного поля {"value": строка, "confidence": 0..1}.
@@ -112,6 +117,13 @@ async def by_model(*, text: str | None, image: str | None, visitor: str) -> Extr
                 amount = money(value)
                 value = rub(amount) if amount is not None else value
             conf = float(item.get("confidence") or 0.0)
+            if (key == "counterparty" and OWN_NAME in value.lower().replace("ё", "е")) or (
+                key == "inn" and value == OWN_INN
+            ):
+                # The model took our own company for the other side: better «не найдено» than a wrong match.
+                if key in REQUIRED:
+                    fields.append(Field(key, label, "не найдено", 0.0))
+                continue
             fields.append(Field(key, label, value, max(0.0, min(1.0, conf))))
         elif key in REQUIRED:
             fields.append(Field(key, label, "не найдено", 0.0))
