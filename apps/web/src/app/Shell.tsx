@@ -64,7 +64,7 @@ function Sidebar({
   const groups: [NavItem['group'], string | null][] = [
     ['main', null],
     ['ai', 'ИИ-слой'],
-    ['meta', 'Проект'],
+    ['work', 'Как мы работаем'],
   ]
   return (
     <div className="flex h-full flex-col gap-4 px-3 py-4">

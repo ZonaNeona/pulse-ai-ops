@@ -4,6 +4,8 @@ Who is asking is decided by the server (`core.visitor`): the session cookie sepa
 drafts and chat, the IP hash carries the AI limits. Nothing is taken from client-sent ids.
 """
 
+import json
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
@@ -237,3 +239,13 @@ async def bot_webhook(
         raise HTTPException(status_code=403, detail="forbidden")
     await bot.feed(await request.json())
     return {"ok": True}
+
+
+# --- How we work ----------------------------------------------------------------
+
+
+@router.get("/work/quality")
+def get_quality() -> dict[str, Any] | None:
+    """Measured by `tools/quality_report.py` when the release was built; None on a dev checkout."""
+    path = Path(__file__).parent / "quality.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None

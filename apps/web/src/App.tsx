@@ -12,6 +12,9 @@ const Knowledge = lazy(() => import('@/screens/Knowledge').then((m) => ({ defaul
 const Integrations = lazy(() => import('@/screens/Integrations').then((m) => ({ default: m.Integrations })))
 const Copilot = lazy(() => import('@/screens/Copilot').then((m) => ({ default: m.Copilot })))
 const UnderTheHood = lazy(() => import('@/screens/UnderTheHood').then((m) => ({ default: m.UnderTheHood })))
+const HowWeWork = lazy(() => import('@/screens/HowWeWork').then((m) => ({ default: m.HowWeWork })))
+const Roadmap = lazy(() => import('@/screens/Roadmap').then((m) => ({ default: m.Roadmap })))
+const Quality = lazy(() => import('@/screens/Quality').then((m) => ({ default: m.QualityScreen })))
 const DesignSystem = lazy(() => import('@/screens/DesignSystem').then((m) => ({ default: m.DesignSystem })))
 
 function Screen({ path }: { path: string }) {
@@ -22,6 +25,9 @@ function Screen({ path }: { path: string }) {
   if (path === '/integrations') return <Integrations />
   if (path === '/copilot') return <Copilot />
   if (path === '/under-the-hood') return <UnderTheHood />
+  if (path === '/work') return <HowWeWork />
+  if (path === '/work/roadmap') return <Roadmap />
+  if (path === '/work/quality') return <Quality />
   if (path === '/design') return <DesignSystem />
   return <Empty title="Страница не найдена" text="Проверьте адрес или откройте обзор" />
 }

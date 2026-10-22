@@ -8,6 +8,7 @@ import { Meter } from '@/ui/charts'
 import { ms, num, usd } from '@/ui/format'
 import { GithubIcon } from '@/ui/icons'
 import { Badge, Button, Card, CardHeader, Empty, PageHeader, Skeleton } from '@/ui/kit'
+import { AgentFlow } from '@/ui/flow/AgentFlow'
 import { TraceTimeline } from '@/ui/Trace'
 
 const STACK = [
@@ -125,7 +126,13 @@ export function UnderTheHood() {
                 </div>
               }
             />
-            <TraceTimeline run={run} />
+            <AgentFlow run={run} />
+            <details className="group mt-3">
+              <summary className="cursor-pointer text-xs text-accent">Шаги подробно</summary>
+              <div className="mt-3">
+                <TraceTimeline run={run} />
+              </div>
+            </details>
           </>
         )}
       </Card>

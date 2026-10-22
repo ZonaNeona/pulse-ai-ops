@@ -39,7 +39,8 @@ def ensure_cookie(request: Request, response: Response) -> None:
     """Middleware hook: give a first-time visitor a session id (the same request already uses it)."""
     if not request.cookies.get(COOKIE):
         sid = getattr(request.state, "new_session", "") or secrets.token_urlsafe(16)
-        response.set_cookie(COOKIE, sid, max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax", secure=False)
+        https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+        response.set_cookie(COOKIE, sid, max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax", secure=https)
 
 
 def assign(request: Request) -> None:

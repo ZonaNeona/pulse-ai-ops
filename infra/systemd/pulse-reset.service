@@ -4,8 +4,6 @@ After=pulse-api.service
 
 [Service]
 Type=oneshot
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/pulse/apps/api
 EnvironmentFile=-/etc/pulse/pulse.env
-ExecStart=/opt/pulse/apps/api/.venv/bin/python -c "import asyncio; from pulse import sync; asyncio.run(sync.reset())"
+# Through the running API, so the reset takes the same lock as its background sync loop.
+ExecStart=/bin/sh -c 'curl -fsS -X POST -H "X-Admin-Key: $ADMIN_KEY" http://127.0.0.1:8010/api/admin/reset'

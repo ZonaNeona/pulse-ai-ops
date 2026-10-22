@@ -32,3 +32,4 @@ var/
 .idea/
 .DS_Store
 Thumbs.db
+apps/api/pulse/quality.json
