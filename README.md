@@ -3,7 +3,7 @@
 > **Открытая промышленная платформа операционного управления бизнесом на базе ИИ-агентов.**  
 > Объединяет управление отделом продаж (Битрикс24), учет и склад (1С), интеллектуальный документооборот (LangGraph), корпоративную базу регламентов (RAG) и оркестрацию агентов (Hermes Agent + MCP).
 
-[![CI](https://github.com/shvarev/pulse-ai-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/shvarev/pulse-ai-ops/actions/workflows/ci.yml)
+[![CI](https://github.com/ZonaNeona/pulse-ai-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/ZonaNeona/pulse-ai-ops/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![Coverage](https://img.shields.io/badge/coverage-86%25-brightgreen.svg)](tests/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)](https://fastapi.tiangolo.com/)
@@ -120,7 +120,7 @@
 Клонируйте репозиторий и поднимите контейнеры одной командой:
 
 ```bash
-git clone https://github.com/shvarev/pulse-ai-ops.git
+git clone https://github.com/ZonaNeona/pulse-ai-ops.git
 cd pulse-ai-ops
 docker compose up -d
 ```
@@ -138,7 +138,7 @@ docker compose up -d
 
 1. **Клонирование и настройка окружения:**
    ```bash
-   git clone https://github.com/shvarev/pulse-ai-ops.git
+   git clone https://github.com/ZonaNeona/pulse-ai-ops.git
    cd pulse-ai-ops
    cp .env.example .env
    ```
